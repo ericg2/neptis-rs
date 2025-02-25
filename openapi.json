@@ -3407,6 +3407,49 @@
         },
         "additionalProperties": false
       },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "readOnly": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "readOnly": true
+          },
+          "type": {
+            "$ref": "#/components/schemas/ErrorType"
+          },
+          "numericType": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": { },
+            "nullable": true,
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorType": {
+        "enum": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
       "FileDto": {
         "type": "object",
         "properties": {
@@ -4050,23 +4093,29 @@
       "SystemStatusDto": {
         "type": "object",
         "properties": {
-          "cpUs": {
+          "cpus": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CPUItemDto"
             },
             "nullable": true
           },
-          "averageCPU": {
-            "$ref": "#/components/schemas/CPUItemDto"
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "nullable": true
           },
           "apiUptime": {
             "type": "string",
-            "format": "date-span"
+            "format": "date-span",
+            "nullable": true
           },
           "systemUptime": {
             "type": "string",
-            "format": "date-span"
+            "format": "date-span",
+            "nullable": true
           },
           "apiVersion": {
             "type": "string",
@@ -4078,39 +4127,63 @@
           },
           "totalUsersRegistered": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
           "totalDataPoints": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
           "totalRepoPoints": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
-          "totalDataBytes": {
+          "maxDataBytes": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
-          "totalRepoBytes": {
+          "maxRepoBytes": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
           "allocatedDataBytes": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
           "allocatedRepoBytes": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
           "totalJobs": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
           },
-          "runningJobs": {
+          "totalRunningJobs": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "nullable": true
+          },
+          "freeDataBytes": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "readOnly": true
+          },
+          "freeRepoBytes": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "readOnly": true
+          },
+          "averageCpu": {
+            "$ref": "#/components/schemas/CPUItemDto"
           }
         },
         "additionalProperties": false
