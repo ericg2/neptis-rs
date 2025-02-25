@@ -15,8 +15,6 @@ use serde::{Deserialize, Serialize};
 pub struct SystemStatusDto {
     #[serde(rename = "cpus", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub cpus: Option<Option<Vec<models::CpuItemDto>>>,
-    #[serde(rename = "errors", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
-    pub errors: Option<Option<Vec<models::Error>>>,
     #[serde(rename = "apiUptime", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub api_uptime: Option<Option<String>>,
     #[serde(rename = "systemUptime", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
@@ -55,7 +53,6 @@ impl SystemStatusDto {
     pub fn new() -> SystemStatusDto {
         SystemStatusDto {
             cpus: None,
-            errors: None,
             api_uptime: None,
             system_uptime: None,
             api_version: None,

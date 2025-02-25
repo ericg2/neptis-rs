@@ -3407,49 +3407,6 @@
         },
         "additionalProperties": false
       },
-      "Error": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "nullable": true,
-            "readOnly": true
-          },
-          "description": {
-            "type": "string",
-            "nullable": true,
-            "readOnly": true
-          },
-          "type": {
-            "$ref": "#/components/schemas/ErrorType"
-          },
-          "numericType": {
-            "type": "integer",
-            "format": "int32",
-            "readOnly": true
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": { },
-            "nullable": true,
-            "readOnly": true
-          }
-        },
-        "additionalProperties": false
-      },
-      "ErrorType": {
-        "enum": [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5,
-          6
-        ],
-        "type": "integer",
-        "format": "int32"
-      },
       "FileDto": {
         "type": "object",
         "properties": {
@@ -4097,13 +4054,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CPUItemDto"
-            },
-            "nullable": true
-          },
-          "errors": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Error"
             },
             "nullable": true
           },
