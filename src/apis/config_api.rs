@@ -30,30 +30,9 @@ pub enum UpdateGlobalConfigError {
 }
 
 
-pub async fn get_global_config(configuration: &configuration::Configuration, ) -> Result<models::DynamicConfigDto, Error<GetGlobalConfigError>> {
+pub async fn get_global_config(configuration: &configuration::Configuration) -> Result<models::DynamicConfigDto, Error<GetGlobalConfigError>> {
     let uri_str = format!("{}/api/configs", configuration.base_path);
-    let mut req_builder = configuration.client.request(reqwest::Method::GET, &uri_str);
-
-    if let Some(ref user_agent) = configuration.user_agent {
-        req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent.clone());
-    }
-    if let Some(ref token) = configuration.bearer_access_token {
-        req_builder = req_builder.bearer_auth(token.to_owned());
-    };
-
-    let req = req_builder.build()?;
-    let resp = configuration.client.execute(req).await?;
-
-    let status = resp.status();
-
-    if !status.is_client_error() && !status.is_server_error() {
-        let content = resp.text().await?;
-        serde_json::from_str(&content).map_err(Error::from)
-    } else {
-        let content = resp.text().await?;
-        let entity: Option<GetGlobalConfigError> = serde_json::from_str(&content).ok();
-        Err(Error::ResponseError(ResponseContent { status, content, entity }))
-    }
+    configuration.execute(reqwest::Method::GET, &uri_str, None).await
 }
 
 pub async fn update_global_config(configuration: &configuration::Configuration, global_config_put_dto: Option<models::GlobalConfigPutDto>) -> Result<models::DynamicConfigDto, Error<UpdateGlobalConfigError>> {
@@ -61,28 +40,6 @@ pub async fn update_global_config(configuration: &configuration::Configuration, 
     let p_global_config_put_dto = global_config_put_dto;
 
     let uri_str = format!("{}/api/configs", configuration.base_path);
-    let mut req_builder = configuration.client.request(reqwest::Method::PUT, &uri_str);
-
-    if let Some(ref user_agent) = configuration.user_agent {
-        req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent.clone());
-    }
-    if let Some(ref token) = configuration.bearer_access_token {
-        req_builder = req_builder.bearer_auth(token.to_owned());
-    };
-    req_builder = req_builder.json(&p_global_config_put_dto);
-
-    let req = req_builder.build()?;
-    let resp = configuration.client.execute(req).await?;
-
-    let status = resp.status();
-
-    if !status.is_client_error() && !status.is_server_error() {
-        let content = resp.text().await?;
-        serde_json::from_str(&content).map_err(Error::from)
-    } else {
-        let content = resp.text().await?;
-        let entity: Option<UpdateGlobalConfigError> = serde_json::from_str(&content).ok();
-        Err(Error::ResponseError(ResponseContent { status, content, entity }))
-    }
+    configuration.executet(reqwest::Method::PUT, &uri_str, p_global_config_put_dto).await
 }
 

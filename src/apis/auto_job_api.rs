@@ -42,56 +42,12 @@ pub async fn delete_one_auto_job(configuration: &configuration::Configuration, a
     let p_auto_job_get_dto = auto_job_get_dto;
 
     let uri_str = format!("{}/api/autojobs", configuration.base_path);
-    let mut req_builder = configuration.client.request(reqwest::Method::DELETE, &uri_str);
-
-    if let Some(ref user_agent) = configuration.user_agent {
-        req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent.clone());
-    }
-    if let Some(ref token) = configuration.bearer_access_token {
-        req_builder = req_builder.bearer_auth(token.to_owned());
-    };
-    req_builder = req_builder.json(&p_auto_job_get_dto);
-
-    let req = req_builder.build()?;
-    let resp = configuration.client.execute(req).await?;
-
-    let status = resp.status();
-
-    if !status.is_client_error() && !status.is_server_error() {
-        let content = resp.text().await?;
-        serde_json::from_str(&content).map_err(Error::from)
-    } else {
-        let content = resp.text().await?;
-        let entity: Option<DeleteOneAutoJobError> = serde_json::from_str(&content).ok();
-        Err(Error::ResponseError(ResponseContent { status, content, entity }))
-    }
+    configuration.execute(reqwest::Method::DELETE, &uri_str, p_auto_job_get_dto).await
 }
 
-pub async fn get_all_auto_jobs(configuration: &configuration::Configuration, ) -> Result<Vec<models::AutoJobConfigDto>, Error<GetAllAutoJobsError>> {
-
+pub async fn get_all_auto_jobs(configuration: &configuration::Configuration) -> Result<Vec<models::AutoJobConfigDto>, Error<GetAllAutoJobsError>> {
     let uri_str = format!("{}/api/autojobs", configuration.base_path);
-    let mut req_builder = configuration.client.request(reqwest::Method::GET, &uri_str);
-
-    if let Some(ref user_agent) = configuration.user_agent {
-        req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent.clone());
-    }
-    if let Some(ref token) = configuration.bearer_access_token {
-        req_builder = req_builder.bearer_auth(token.to_owned());
-    };
-
-    let req = req_builder.build()?;
-    let resp = configuration.client.execute(req).await?;
-
-    let status = resp.status();
-
-    if !status.is_client_error() && !status.is_server_error() {
-        let content = resp.text().await?;
-        serde_json::from_str(&content).map_err(Error::from)
-    } else {
-        let content = resp.text().await?;
-        let entity: Option<GetAllAutoJobsError> = serde_json::from_str(&content).ok();
-        Err(Error::ResponseError(ResponseContent { status, content, entity }))
-    }
+    configuration.execute(reqwest::Method::GET, &uri_str, None).await
 }
 
 pub async fn update_one_auto_job(configuration: &configuration::Configuration, auto_job_put_dto: Option<models::AutoJobPutDto>) -> Result<models::AutoJobConfigDto, Error<UpdateOneAutoJobError>> {
@@ -99,28 +55,6 @@ pub async fn update_one_auto_job(configuration: &configuration::Configuration, a
     let p_auto_job_put_dto = auto_job_put_dto;
 
     let uri_str = format!("{}/api/autojobs", configuration.base_path);
-    let mut req_builder = configuration.client.request(reqwest::Method::PUT, &uri_str);
-
-    if let Some(ref user_agent) = configuration.user_agent {
-        req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent.clone());
-    }
-    if let Some(ref token) = configuration.bearer_access_token {
-        req_builder = req_builder.bearer_auth(token.to_owned());
-    };
-    req_builder = req_builder.json(&p_auto_job_put_dto);
-
-    let req = req_builder.build()?;
-    let resp = configuration.client.execute(req).await?;
-
-    let status = resp.status();
-
-    if !status.is_client_error() && !status.is_server_error() {
-        let content = resp.text().await?;
-        serde_json::from_str(&content).map_err(Error::from)
-    } else {
-        let content = resp.text().await?;
-        let entity: Option<UpdateOneAutoJobError> = serde_json::from_str(&content).ok();
-        Err(Error::ResponseError(ResponseContent { status, content, entity }))
-    }
+    configuration.execute(reqwest::Method::PUT, &uri_str, p_auto_job_put_dto).await
 }
 

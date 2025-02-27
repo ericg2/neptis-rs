@@ -44,15 +44,17 @@ impl Configuration {
     pub async fn execute<
         'a,
         JsonIn: Serialize,
+        QueryIn: Serialize + Sized,
         U: IntoUrl,
         E: Deserialize<'a>,
         JsonOut: Deserialize<'a>,
     >(
         &self,
         method: reqwest::Method,
-        full_uri: &U,
+        full_uri: U,
         body: Option<JsonIn>,
-    ) -> Result<Option<JsonOut>, Error<E>> {
+        queries: Option<&[QueryIn]>
+    ) -> Result<JsonOut, Error<E>> {
         // First, we need to create the request.
         let mut final_url = full_uri.as_str();
         let mut final_body = body.map(|x| serde_json::to_vec(&x)).transpose()?;
@@ -92,6 +94,12 @@ impl Configuration {
 
         // Finally, build the request and process.
         let mut req_builder = self.client.request(method, final_url);
+        if let Some(u_queries) = queries {
+            for i in u_queries.iter() {
+                req_builder = req_builder.query(i);
+            }
+        }
+
         if let Some(ref user_agent) = self.user_agent {
             req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent.clone());
         }
@@ -119,13 +127,13 @@ impl Configuration {
         let status = res.status();
         if !status.is_client_error() && !status.is_server_error() {
             // We need to convert the output to JSON and return.
-            let json_res = serde_json::from_slice(&res_body[..])?;
+            let json_res: JsonOut = serde_json::from_slice(&res_body[..])?;
             Ok(json_res)
         } else {
             let entity: Option<E> = serde_json::from_slice(&res_body.as_slice()).ok();
             Err(Error::ResponseError(ResponseContent {
                 status,
-                content,
+                content: String::from_utf8(res_body).unwrap_or(String::new()),
                 entity,
             }))
         }
@@ -138,6 +146,7 @@ impl Default for Configuration {
             base_path: "http://localhost".to_owned(),
             user_agent: Some("OpenAPI-Generator/v1/rust".to_owned()),
             client: Client::new(),
+            secret: None,
             basic_auth: None,
             oauth_access_token: None,
             bearer_access_token: None,
