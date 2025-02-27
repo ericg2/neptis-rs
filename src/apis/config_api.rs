@@ -31,7 +31,6 @@ pub enum UpdateGlobalConfigError {
 
 
 pub async fn get_global_config(configuration: &configuration::Configuration, ) -> Result<models::DynamicConfigDto, Error<GetGlobalConfigError>> {
-
     let uri_str = format!("{}/api/configs", configuration.base_path);
     let mut req_builder = configuration.client.request(reqwest::Method::GET, &uri_str);
 
