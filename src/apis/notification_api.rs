@@ -12,6 +12,7 @@ use super::{Error, configuration};
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// struct for typed errors of method [`delete_one_notification`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +69,12 @@ pub async fn delete_one_notification(
         id = crate::apis::urlencode(p_id)
     );
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, None, None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -81,7 +87,12 @@ pub async fn delete_one_notification_config(
 
     let uri_str = format!("{}/api/notifications/configs", configuration.base_path);
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, Some(p_body), None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            Some(p_body),
+            None::<Value>,
+        )
         .await
 }
 
@@ -90,7 +101,7 @@ pub async fn get_all_notification_configs(
 ) -> Result<Vec<models::WsConfigItemDto>, Error<GetAllNotificationConfigsError>> {
     let uri_str = format!("{}/api/notifications/configs", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -106,7 +117,7 @@ pub async fn get_all_notifications(
         .execute(
             reqwest::Method::GET,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[("unreadOnly", &p_unread_only.to_string())]),
         )
         .await
@@ -125,7 +136,7 @@ pub async fn get_one_notification(
         id = crate::apis::urlencode(p_id)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -142,7 +153,7 @@ pub async fn update_one_notification_config(
             reqwest::Method::PUT,
             &uri_str,
             Some(p_ws_config_put_dto),
-            None,
+            None::<Value>,
         )
         .await
 }

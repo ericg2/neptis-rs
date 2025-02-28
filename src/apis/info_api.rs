@@ -12,6 +12,7 @@ use super::{Error, configuration};
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// struct for typed errors of method [`get_system_summary`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +47,7 @@ pub async fn get_system_summary(
 ) -> Result<models::SystemStatusDto, Error<GetSystemSummaryError>> {
     let uri_str = format!("{}/api/infos/summary", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -55,7 +56,7 @@ pub async fn get_valid_notify_methods(
 ) -> Result<Vec<String>, Error<GetValidNotifyMethodsError>> {
     let uri_str = format!("{}/api/infos/validnotifymethods", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -64,7 +65,7 @@ pub async fn get_valid_notify_subscriptions(
 ) -> Result<Vec<String>, Error<GetValidNotifySubscriptionsError>> {
     let uri_str = format!("{}/api/infos/validsubscriptions", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -73,6 +74,6 @@ pub async fn get_valid_permissions(
 ) -> Result<Vec<String>, Error<GetValidPermissionsError>> {
     let uri_str = format!("{}/api/infos/validperms", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }

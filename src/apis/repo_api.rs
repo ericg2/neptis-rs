@@ -12,6 +12,7 @@ use super::{Error, configuration};
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// struct for typed errors of method [`api_repos_get`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,7 +117,7 @@ pub async fn api_repos_get(
 ) -> Result<Vec<models::RepoPointDto>, Error<ApiReposGetError>> {
     let uri_str = format!("{}/api/repos", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -136,7 +137,12 @@ pub async fn api_repos_point_user_point_name_delete(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, None, None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -156,7 +162,7 @@ pub async fn api_repos_point_user_point_name_get(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -181,7 +187,7 @@ pub async fn api_repos_point_user_point_name_put(
         .execute(
             reqwest::Method::PUT,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[("maxBytes", &p_max_bytes.to_string())]),
         )
         .await
@@ -208,7 +214,7 @@ pub async fn api_repos_point_user_point_name_shares_delete(
         .execute(
             reqwest::Method::DELETE,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[("user", &p_user.to_string())]),
         )
         .await
@@ -235,7 +241,7 @@ pub async fn api_repos_point_user_point_name_shares_get(
         .execute(
             reqwest::Method::GET,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[("user", &p_user.to_string())]),
         )
         .await
@@ -263,7 +269,7 @@ pub async fn api_repos_point_user_point_name_shares_put(
             reqwest::Method::PUT,
             &uri_str,
             Some(p_repo_point_share_dto),
-            None,
+            None::<Value>,
         )
         .await
 }
@@ -282,7 +288,7 @@ pub async fn api_repos_post(
         .execute(
             reqwest::Method::POST,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[
                 ("name", &p_name.to_string()),
                 ("maxBytes", &p_max_bytes.to_string()),
@@ -304,7 +310,7 @@ pub async fn browse_files_for_repo(
             reqwest::Method::GET,
             &uri_str,
             Some(p_data_point_browse_get_dto),
-            None,
+            None::<Value>,
         )
         .await
 }
@@ -328,7 +334,12 @@ pub async fn delete_one_snapshot_for_repo(
         id = crate::apis::urlencode(p_id)
     );
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, None, None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -341,7 +352,7 @@ pub async fn dump_file_for_repo(
 
     let uri_str = format!("{}/api/repos/dump", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, Some(p_body), None)
+        .execute(reqwest::Method::GET, &uri_str, Some(p_body), None::<Value>)
         .await
 }
 
@@ -361,7 +372,7 @@ pub async fn get_all_jobs_for_repo(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -381,7 +392,7 @@ pub async fn get_all_snapshots_for_repo(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -404,6 +415,6 @@ pub async fn get_one_snapshot_for_repo(
         id = crate::apis::urlencode(p_id)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }

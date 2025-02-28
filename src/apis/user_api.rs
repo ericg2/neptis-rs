@@ -12,6 +12,7 @@ use super::{Error, configuration};
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// struct for typed errors of method [`create_one_user`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +97,7 @@ pub async fn create_one_user(
             reqwest::Method::POST,
             &uri_str,
             Some(p_user_create_dto),
-            None,
+            None::<Value>,
         )
         .await
 }
@@ -114,7 +115,12 @@ pub async fn delete_one_user(
         userName = crate::apis::urlencode(p_user_name)
     );
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, None, None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -134,7 +140,12 @@ pub async fn disable_one_permission_for_user(
         permissionName = crate::apis::urlencode(p_permission_name)
     );
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, None, None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -154,7 +165,12 @@ pub async fn enable_one_permission_for_user(
         permissionName = crate::apis::urlencode(p_permission_name)
     );
     configuration
-        .execute(reqwest::Method::POST, &uri_str, None, None)
+        .execute(
+            reqwest::Method::POST,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -171,7 +187,7 @@ pub async fn get_all_permissions_for_user(
         userName = crate::apis::urlencode(p_user_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -180,7 +196,7 @@ pub async fn get_all_users(
 ) -> Result<Vec<models::UserSummaryDto>, Error<GetAllUsersError>> {
     let uri_str = format!("{}/api/users", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -200,7 +216,7 @@ pub async fn get_one_permission_for_user(
         permissionName = crate::apis::urlencode(p_permission_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -217,7 +233,7 @@ pub async fn get_one_user(
         userName = crate::apis::urlencode(p_user_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -240,7 +256,7 @@ pub async fn update_all_permissions_for_user(
             reqwest::Method::PUT,
             &uri_str,
             Some(p_user_permission_dto),
-            None,
+            None::<Value>,
         )
         .await
 }
@@ -260,6 +276,11 @@ pub async fn update_one_user(
         userName = crate::apis::urlencode(p_user_name)
     );
     configuration
-        .execute(reqwest::Method::PUT, &uri_str, Some(p_user_put_dto), None)
+        .execute(
+            reqwest::Method::PUT,
+            &uri_str,
+            Some(p_user_put_dto),
+            None::<Value>,
+        )
         .await
 }

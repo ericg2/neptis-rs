@@ -12,6 +12,7 @@ use super::{Error, configuration};
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// struct for typed errors of method [`delete_one_log`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,7 +44,12 @@ pub async fn delete_one_log(
 
     let uri_str = format!("{}/api/logs/{id}", configuration.base_path, id = p_id);
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, None, None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -52,7 +58,7 @@ pub async fn get_all_logs(
 ) -> Result<Vec<models::LogItemDto>, Error<GetAllLogsError>> {
     let uri_str = format!("{}/api/logs", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -65,6 +71,6 @@ pub async fn get_one_log(
 
     let uri_str = format!("{}/api/logs/{id}", configuration.base_path, id = p_id);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }

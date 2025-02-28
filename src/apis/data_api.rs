@@ -12,6 +12,7 @@ use super::{Error, configuration};
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// struct for typed errors of method [`api_datas_get`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,7 +110,7 @@ pub async fn api_datas_get(
 ) -> Result<Vec<models::DataPointDto>, Error<ApiDatasGetError>> {
     let uri_str = format!("{}/api/datas", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -129,7 +130,12 @@ pub async fn api_datas_point_user_point_name_delete(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, None, None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            None::<Value>,
+            None::<Value>,
+        )
         .await
 }
 
@@ -149,7 +155,7 @@ pub async fn api_datas_point_user_point_name_get(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -175,7 +181,7 @@ pub async fn api_datas_point_user_point_name_put(
         .execute(
             reqwest::Method::PUT,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[("maxBytes", &p_max_bytes.to_string())]),
         )
         .await
@@ -206,7 +212,7 @@ pub async fn api_datas_point_user_point_name_shares_delete(
         .execute(
             reqwest::Method::DELETE,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[("user", &p_user.to_string())]),
         )
         .await
@@ -233,7 +239,7 @@ pub async fn api_datas_point_user_point_name_shares_get(
         .execute(
             reqwest::Method::GET,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[("user", &p_user.to_string())]),
         )
         .await
@@ -257,7 +263,12 @@ pub async fn api_datas_point_user_point_name_shares_put(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::PUT, &uri_str, p_data_point_share_dto, None)
+        .execute(
+            reqwest::Method::PUT,
+            &uri_str,
+            p_data_point_share_dto,
+            None::<Value>,
+        )
         .await
 }
 
@@ -275,7 +286,7 @@ pub async fn api_datas_post(
         .execute(
             reqwest::Method::POST,
             &uri_str,
-            None,
+            None::<Value>,
             Some(&[
                 ("name", &p_name.to_string()),
                 ("maxBytes", &p_max_bytes.to_string()),
@@ -297,7 +308,7 @@ pub async fn browse_files_for_data(
             reqwest::Method::GET,
             &uri_str,
             Some(p_data_point_browse_get_dto),
-            None,
+            None::<Value>,
         )
         .await
 }
@@ -311,7 +322,12 @@ pub async fn delete_one_file_for_data(
 
     let uri_str = format!("{}/api/datas/files", configuration.base_path);
     configuration
-        .execute(reqwest::Method::DELETE, &uri_str, Some(p_body), None)
+        .execute(
+            reqwest::Method::DELETE,
+            &uri_str,
+            Some(p_body),
+            None::<Value>,
+        )
         .await
 }
 
@@ -324,7 +340,7 @@ pub async fn dump_one_file_for_data(
 
     let uri_str = format!("{}/api/datas/dump", configuration.base_path);
     configuration
-        .execute(reqwest::Method::GET, &uri_str, Some(p_body), None)
+        .execute(reqwest::Method::GET, &uri_str, Some(p_body), None::<Value>)
         .await
 }
 
@@ -344,7 +360,7 @@ pub async fn get_all_jobs_for_data(
         pointName = crate::apis::urlencode(p_point_name)
     );
     configuration
-        .execute(reqwest::Method::GET, &uri_str, None, None)
+        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
         .await
 }
 
@@ -357,6 +373,11 @@ pub async fn update_one_file_for_data(
 
     let uri_str = format!("{}/api/datas/files", configuration.base_path);
     configuration
-        .execute(reqwest::Method::PUT, &uri_str, Some(p_file_put_dto), None)
+        .execute(
+            reqwest::Method::PUT,
+            &uri_str,
+            Some(p_file_put_dto),
+            None::<Value>,
+        )
         .await
 }
