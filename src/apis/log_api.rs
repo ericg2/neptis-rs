@@ -13,6 +13,7 @@ use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::apis::configuration::ApiBuilder;
 
 /// struct for typed errors of method [`delete_one_log`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,13 +44,8 @@ pub async fn delete_one_log(
     let p_id = id;
 
     let uri_str = format!("{}/api/logs/{id}", configuration.base_path, id = p_id);
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            None::<Value>,
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::DELETE, &uri_str)
+        .execute()
         .await
 }
 
@@ -57,8 +53,8 @@ pub async fn get_all_logs(
     configuration: &configuration::Configuration,
 ) -> Result<Vec<models::LogItemDto>, Error<GetAllLogsError>> {
     let uri_str = format!("{}/api/logs", configuration.base_path);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -70,7 +66,7 @@ pub async fn get_one_log(
     let p_id = id;
 
     let uri_str = format!("{}/api/logs/{id}", configuration.base_path, id = p_id);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }

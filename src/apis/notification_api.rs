@@ -13,6 +13,7 @@ use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::apis::configuration::ApiBuilder;
 
 /// struct for typed errors of method [`delete_one_notification`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,13 +69,8 @@ pub async fn delete_one_notification(
         configuration.base_path,
         id = crate::apis::urlencode(p_id)
     );
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            None::<Value>,
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::DELETE, &uri_str)
+        .execute()
         .await
 }
 
@@ -86,13 +82,9 @@ pub async fn delete_one_notification_config(
     let p_body = body;
 
     let uri_str = format!("{}/api/notifications/configs", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            Some(p_body),
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::DELETE, &uri_str)
+        .with_body(p_body)
+        .execute()
         .await
 }
 
@@ -100,8 +92,8 @@ pub async fn get_all_notification_configs(
     configuration: &configuration::Configuration,
 ) -> Result<Vec<models::WsConfigItemDto>, Error<GetAllNotificationConfigsError>> {
     let uri_str = format!("{}/api/notifications/configs", configuration.base_path);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -113,13 +105,9 @@ pub async fn get_all_notifications(
     let p_unread_only = unread_only;
 
     let uri_str = format!("{}/api/notifications", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::GET,
-            &uri_str,
-            None::<Value>,
-            Some(&[("unreadOnly", &p_unread_only.to_string())]),
-        )
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .with_opt_query("unreadOnly", p_unread_only)?
+        .execute()
         .await
 }
 
@@ -135,8 +123,8 @@ pub async fn get_one_notification(
         configuration.base_path,
         id = crate::apis::urlencode(p_id)
     );
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -148,12 +136,8 @@ pub async fn update_one_notification_config(
     let p_ws_config_put_dto = ws_config_put_dto;
 
     let uri_str = format!("{}/api/notifications/configs", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::PUT,
-            &uri_str,
-            Some(p_ws_config_put_dto),
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::PUT, &uri_str)
+        .with_body(p_ws_config_put_dto)
+        .execute()
         .await
 }

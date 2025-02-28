@@ -13,6 +13,7 @@ use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::apis::configuration::ApiBuilder;
 
 /// struct for typed errors of method [`cancel_one_job`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,13 +62,8 @@ pub async fn cancel_one_job(
         configuration.base_path,
         id = crate::apis::urlencode(p_id)
     );
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            None::<Value>,
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::DELETE, &uri_str)
+        .execute()
         .await
 }
 
@@ -75,8 +71,8 @@ pub async fn get_all_jobs(
     configuration: &configuration::Configuration,
 ) -> Result<Vec<models::RepoDataJobDto>, Error<GetAllJobsError>> {
     let uri_str = format!("{}/api/jobs", configuration.base_path);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -92,8 +88,8 @@ pub async fn get_one_job(
         configuration.base_path,
         id = crate::apis::urlencode(p_id)
     );
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -105,13 +101,9 @@ pub async fn start_one_backup(
     let p_job_backup_dto = job_backup_dto;
 
     let uri_str = format!("{}/api/jobs/backup", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::POST,
-            &uri_str,
-            Some(p_job_backup_dto),
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::POST, &uri_str)
+        .with_body(p_job_backup_dto)
+        .execute()
         .await
 }
 
@@ -123,12 +115,8 @@ pub async fn start_one_restore(
     let p_job_restore_dto = job_restore_dto;
 
     let uri_str = format!("{}/api/jobs/restore", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::POST,
-            &uri_str,
-            Some(p_job_restore_dto),
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::POST, &uri_str)
+        .with_body(p_job_restore_dto)
+        .execute()
         .await
 }

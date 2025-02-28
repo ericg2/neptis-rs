@@ -9,6 +9,7 @@
  */
 
 use super::{Error, configuration};
+use crate::apis::configuration::ApiBuilder;
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
@@ -109,8 +110,8 @@ pub async fn api_datas_get(
     configuration: &configuration::Configuration,
 ) -> Result<Vec<models::DataPointDto>, Error<ApiDatasGetError>> {
     let uri_str = format!("{}/api/datas", configuration.base_path);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -129,13 +130,8 @@ pub async fn api_datas_point_user_point_name_delete(
         pointUser = crate::apis::urlencode(p_point_user),
         pointName = crate::apis::urlencode(p_point_name)
     );
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            None::<Value>,
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::DELETE, &uri_str)
+        .execute()
         .await
 }
 
@@ -154,8 +150,8 @@ pub async fn api_datas_point_user_point_name_get(
         pointUser = crate::apis::urlencode(p_point_user),
         pointName = crate::apis::urlencode(p_point_name)
     );
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -177,16 +173,11 @@ pub async fn api_datas_point_user_point_name_put(
         pointName = crate::apis::urlencode(p_point_name)
     );
 
-    configuration
-        .execute(
-            reqwest::Method::PUT,
-            &uri_str,
-            None::<Value>,
-            Some(&[("maxBytes", &p_max_bytes.to_string())]),
-        )
+    ApiBuilder::new(&configuration, reqwest::Method::PUT, &uri_str)
+        .with_opt_query("maxBytes".into(), p_max_bytes)?
+        .execute()
         .await
 }
-
 pub async fn api_datas_point_user_point_name_shares_delete(
     configuration: &configuration::Configuration,
     point_user: &str,
@@ -204,17 +195,10 @@ pub async fn api_datas_point_user_point_name_shares_delete(
         pointUser = crate::apis::urlencode(p_point_user),
         pointName = crate::apis::urlencode(p_point_name)
     );
-    let mut req_builder = configuration
-        .client
-        .request(reqwest::Method::DELETE, &uri_str);
 
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            None::<Value>,
-            Some(&[("user", &p_user.to_string())]),
-        )
+    ApiBuilder::new(&configuration, reqwest::Method::DELETE, &uri_str)
+        .with_opt_query("user".into(), p_user)?
+        .execute()
         .await
 }
 
@@ -224,24 +208,16 @@ pub async fn api_datas_point_user_point_name_shares_get(
     point_name: &str,
     user: Option<&str>,
 ) -> Result<Vec<models::DataPointShareDto>, Error<ApiDatasPointUserPointNameSharesGetError>> {
-    // add a prefix to parameters to efficiently prevent name collisions
-    let p_point_user = point_user;
-    let p_point_name = point_name;
-    let p_user = user;
-
     let uri_str = format!(
-        "{}/api/datas/{pointUser}/{pointName}/shares",
+        "{}/api/datas/{}/{}//shares",
         configuration.base_path,
-        pointUser = crate::apis::urlencode(p_point_user),
-        pointName = crate::apis::urlencode(p_point_name)
+        crate::apis::urlencode(point_user),
+        crate::apis::urlencode(point_name)
     );
-    configuration
-        .execute(
-            reqwest::Method::GET,
-            &uri_str,
-            None::<Value>,
-            Some(&[("user", &p_user.to_string())]),
-        )
+
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .with_opt_query("user".into(), user)?
+        .execute()
         .await
 }
 
@@ -262,13 +238,9 @@ pub async fn api_datas_point_user_point_name_shares_put(
         pointUser = crate::apis::urlencode(p_point_user),
         pointName = crate::apis::urlencode(p_point_name)
     );
-    configuration
-        .execute(
-            reqwest::Method::PUT,
-            &uri_str,
-            p_data_point_share_dto,
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::PUT, &uri_str)
+        .with_body(p_data_point_share_dto)
+        .execute()
         .await
 }
 
@@ -282,16 +254,10 @@ pub async fn api_datas_post(
     let p_max_bytes = max_bytes;
 
     let uri_str = format!("{}/api/datas", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::POST,
-            &uri_str,
-            None::<Value>,
-            Some(&[
-                ("name", &p_name.to_string()),
-                ("maxBytes", &p_max_bytes.to_string()),
-            ]),
-        )
+    ApiBuilder::new(configuration, reqwest::Method::POST, &uri_str)
+        .with_opt_query("name".into(), p_name)?
+        .with_opt_query("maxBytes".into(), p_max_bytes)?
+        .execute()
         .await
 }
 
@@ -303,13 +269,9 @@ pub async fn browse_files_for_data(
     let p_data_point_browse_get_dto = data_point_browse_get_dto;
 
     let uri_str = format!("{}/api/datas/files", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::GET,
-            &uri_str,
-            Some(p_data_point_browse_get_dto),
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .with_body(p_data_point_browse_get_dto)
+        .execute()
         .await
 }
 
@@ -321,13 +283,9 @@ pub async fn delete_one_file_for_data(
     let p_body = body;
 
     let uri_str = format!("{}/api/datas/files", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            Some(p_body),
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::DELETE, &uri_str)
+        .with_body(p_body)
+        .execute()
         .await
 }
 
@@ -339,8 +297,9 @@ pub async fn dump_one_file_for_data(
     let p_body = body;
 
     let uri_str = format!("{}/api/datas/dump", configuration.base_path);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, Some(p_body), None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .with_body(p_body)
+        .execute()
         .await
 }
 
@@ -359,8 +318,8 @@ pub async fn get_all_jobs_for_data(
         pointUser = crate::apis::urlencode(p_point_user),
         pointName = crate::apis::urlencode(p_point_name)
     );
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -372,12 +331,8 @@ pub async fn update_one_file_for_data(
     let p_file_put_dto = file_put_dto;
 
     let uri_str = format!("{}/api/datas/files", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::PUT,
-            &uri_str,
-            Some(p_file_put_dto),
-            None::<Value>,
-        )
+    ApiBuilder::new(configuration, reqwest::Method::PUT, &uri_str)
+        .with_body(p_file_put_dto)
+        .execute()
         .await
 }

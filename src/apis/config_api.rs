@@ -13,6 +13,7 @@ use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::apis::configuration::ApiBuilder;
 
 /// struct for typed errors of method [`get_global_config`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,8 +33,8 @@ pub async fn get_global_config(
     configuration: &configuration::Configuration,
 ) -> Result<models::DynamicConfigDto, Error<GetGlobalConfigError>> {
     let uri_str = format!("{}/api/configs", configuration.base_path);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>)
+    ApiBuilder::new(&configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -45,12 +46,8 @@ pub async fn update_global_config(
     let p_global_config_put_dto = global_config_put_dto;
 
     let uri_str = format!("{}/api/configs", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::PUT,
-            &uri_str,
-            p_global_config_put_dto,
-            None::<Value>,
-        )
+    ApiBuilder::new(&configuration, reqwest::Method::PUT, &uri_str)
+        .with_body(p_global_config_put_dto)
+        .execute()
         .await
 }

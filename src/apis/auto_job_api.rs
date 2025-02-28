@@ -9,6 +9,7 @@
  */
 
 use super::{Error, configuration};
+use crate::apis::configuration::ApiBuilder;
 use crate::{apis::ResponseContent, models};
 use reqwest;
 use serde::{Deserialize, Serialize};
@@ -43,13 +44,9 @@ pub async fn delete_one_auto_job(
     let p_auto_job_get_dto = auto_job_get_dto;
 
     let uri_str = format!("{}/api/autojobs", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::DELETE,
-            &uri_str,
-            p_auto_job_get_dto,
-            None::<Value>,
-        )
+    ApiBuilder::new(&configuration, reqwest::Method::DELETE, &uri_str)
+        .with_body(p_auto_job_get_dto)
+        .execute()
         .await
 }
 
@@ -57,8 +54,8 @@ pub async fn get_all_auto_jobs(
     configuration: &configuration::Configuration,
 ) -> Result<Vec<models::AutoJobConfigDto>, Error<GetAllAutoJobsError>> {
     let uri_str = format!("{}/api/autojobs", configuration.base_path);
-    configuration
-        .execute(reqwest::Method::GET, &uri_str, None::<Value>, None::<Value>)
+    ApiBuilder::new(&configuration, reqwest::Method::GET, &uri_str)
+        .execute()
         .await
 }
 
@@ -70,12 +67,8 @@ pub async fn update_one_auto_job(
     let p_auto_job_put_dto = auto_job_put_dto;
 
     let uri_str = format!("{}/api/autojobs", configuration.base_path);
-    configuration
-        .execute(
-            reqwest::Method::PUT,
-            &uri_str,
-            p_auto_job_put_dto,
-            None::<Value>,
-        )
+    ApiBuilder::new(&configuration, reqwest::Method::PUT, &uri_str)
+        .with_body(p_auto_job_put_dto)
+        .execute()
         .await
 }

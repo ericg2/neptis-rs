@@ -11,4 +11,3 @@ extern crate core;
 pub mod apis;
 pub mod models;
 mod rolling_secret;
-mod api_client;

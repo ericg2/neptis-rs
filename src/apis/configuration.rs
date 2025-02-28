@@ -62,15 +62,15 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U>
         self.body = Some(serde_json::to_value(body).expect("Failed to serialize body"));
         self
     }
-    pub fn with_query<T: Serialize>(self, key: &str, val: T) -> Result<Self, Error<()>> {
+    pub fn with_query<T: Serialize, E>(self, key: &str, val: T) -> Result<Self, Error<E>> {
         Self::with_opt_query(self, key, Some(val))
     }
 
-    pub fn with_opt_query<T: Serialize>(
+    pub fn with_opt_query<T: Serialize, E>(
         mut self,
         key: &str,
         val: Option<T>,
-    ) -> Result<Self, Error<()>> {
+    ) -> Result<Self, Error<E>> {
         if let Some(v) = val {
             self.queries
                 .push((key.to_string(), serde_json::to_string(&v)?));
