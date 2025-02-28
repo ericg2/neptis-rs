@@ -97,6 +97,15 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U>
                 .strip_prefix("/")
                 .unwrap_or(full_query.as_str())
                 .to_string();
+            full_query = full_query
+                .strip_prefix("/api")
+                .unwrap_or(full_query.as_str())
+                .to_string();
+            full_query = full_query
+                .strip_prefix("api/")
+                .unwrap_or(full_query.as_str())
+                .to_string();
+
             if !full_query.starts_with("/api/") {
                 full_query = "/api/".to_string() + full_query.as_str();
             }
@@ -179,6 +188,8 @@ impl Configuration {
     pub fn new() -> Configuration {
         Configuration::default()
     }
+
+
 
     // pub async fn execute<
     //     'a,

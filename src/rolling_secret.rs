@@ -1,43 +1,90 @@
-﻿use base64::{engine::general_purpose::STANDARD, Engine as _};
+﻿use aes::Aes256;
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyInit};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use cbc::cipher::KeyIvInit;
+use cbc::{Decryptor, Encryptor};
 use hmac::{Hmac, Mac};
-use sha2::{Sha256, Sha512};
+use rand::seq::{IteratorRandom, SliceRandom};
+use rand::{Rng, SeedableRng, rng, rngs::StdRng, thread_rng};
+use rand::{RngCore, rngs::OsRng};
 use sha2::Digest;
-use rand::{rngs::StdRng, Rng, SeedableRng};
-use aes_gcm::{Aes256Gcm, AesGcm, Key, Nonce};
-use aes_gcm::aead::{Aead};
+use sha2::{Sha256, Sha512};
 use std::convert::TryInto;
-use aes_gcm::aead::consts::U12;
-use aes_gcm::aes::Aes256;
-use rand::seq::SliceRandom;
+use std::vec::Vec;
+use cbc::cipher::block_padding::Pkcs7;
+use totp_rs::Algorithm::SHA512;
+use totp_rs::{Secret, TOTP};
 
 const RANDOM_SEED: u64 = 364324876;
 const CHARACTERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
 
-type HmacSha512 = Hmac<Sha512>;
+type Aes256CbcEnc = Encryptor<Aes256>;
+type Aes256CbcDec = Decryptor<Aes256>;
 
 #[derive(Debug, Clone)]
 pub struct RollingSecret {
-    otp1_key: Vec<u8>,
-    otp2_key: Vec<u8>,
+    otp_a: TOTP,
+    otp_b: TOTP,
     aes_password: String,
 }
 
 impl RollingSecret {
-    pub fn new(otp1_key: Vec<u8>, otp2_key: Vec<u8>, aes_password: String) -> Self {
-        Self { otp1_key, otp2_key, aes_password }
+    fn from_key(key_a: &[u8], key_b: &[u8], aes_password: &str) -> Option<Self> {
+        let otp_a = TOTP::new(SHA512, 8, 0, 60, key_a.to_vec()).ok()?;
+        let otp_b = TOTP::new(SHA512, 8, 0, 60, key_b.to_vec()).ok()?;
+        Some(RollingSecret {
+            otp_a,
+            otp_b,
+            aes_password: aes_password.to_string(),
+        })
+    }
+
+    fn generate_key() -> Vec<u8> {
+        let mut rng = rng();
+        let mut random_bytes = [0u8; 64]; // 64 bytes for a 512-bit input
+        rng.fill_bytes(&mut random_bytes);
+        let hash = Sha512::digest(&random_bytes);
+        hash.to_vec()
+    }
+
+    fn generate_password(length: usize) -> String {
+        let mut rng = rng();
+        (0..length)
+            .map(|_| *CHARACTERS.choose(&mut rng).unwrap() as char)
+            .collect()
+    }
+
+    pub fn generate() -> Option<Self> {
+        Self::from_key(
+            Self::generate_key().as_slice(),
+            Self::generate_key().as_slice(),
+            Self::generate_password(16).as_str(),
+        )
+    }
+
+    pub fn from_string(encoded: &str) -> Option<Self> {
+        let parts: Vec<&str> = encoded.split('§').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+
+        let otp1_key = STANDARD.decode(parts[0]).ok()?;
+        let otp2_key = STANDARD.decode(parts[1]).ok()?;
+        let aes_password = parts[2].to_string();
+
+        Self::from_key(
+            otp1_key.as_slice(),
+            otp2_key.as_slice(),
+            aes_password.as_str(),
+        )
     }
 
     pub fn rolling_key(&self) -> Option<Vec<u8>> {
-        let otp1 = self.compute_totp(&self.otp1_key)?;
-        let otp2 = self.compute_totp(&self.otp2_key)?;
+        let otp1 = self.otp_a.generate_current().ok()?.parse::<i64>().ok()?;
+        let otp2 = self.otp_b.generate_current().ok()?.parse::<i64>().ok()?;
         let otp = otp1 as u64 * otp2 as u64;
         let password = self.scramble_password(&self.aes_password, otp)?;
         Some(Sha256::digest(password.as_bytes()).to_vec())
-    }
-
-    fn compute_totp(&self, key: &[u8]) -> Option<u32> {
-        let hash = HmacSha512::new_from_slice(key).ok()?;
-        Some(u32::from_be_bytes(hash.finalize().into_bytes()[..4].try_into().ok()?))
     }
 
     fn scramble_password(&self, password: &str, secret_key: u64) -> Option<String> {
@@ -76,32 +123,33 @@ impl RollingSecret {
         result
     }
 
-    pub fn encrypt(&self, data: &[u8]) -> Option<Vec<u8>> {
-        let key = self.rolling_key()?;
-        let cipher: Aes256Gcm = aes_gcm::KeyInit::new(Key::<Aes256Gcm>::from_slice(&key));
-        let nonce = Nonce::from_slice(&key[32..44]);
-        cipher.encrypt(nonce, data).ok()
+    pub fn encrypt(data: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+        if key.len() != 32 {
+            return None; // AES-256 requires a 32-byte key
+        }
+
+        let mut iv = [0u8; 16];
+        OsRng.fill_bytes(&mut iv); // Generate a random IV (same as C#)
+
+        let cipher = Aes256CbcEnc::new_from_slices(key, &iv).ok()?;
+        let e_bytes = cipher.encrypt_padded_vec_mut::<Pkcs7>(data);
+
+        let mut result = iv.to_vec();
+        result.extend(e_bytes);
+        Some(result)
     }
 
-    pub fn decrypt(&self, data: &[u8]) -> Option<Vec<u8>> {
-        let key = self.rolling_key()?;
-        let cipher: Aes256Gcm = aes_gcm::KeyInit::new(Key::<Aes256Gcm>::from_slice(&key));
-        let nonce = Nonce::from_slice(&key[32..44]);
-        cipher.decrypt(nonce, data).ok()
-    }
+    /// Decrypts AES-256-CBC data, extracting the IV from the first 16 bytes
+    pub fn decrypt(encrypted_data: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+        if key.len() != 32 || encrypted_data.len() < 16 {
+            return None;
+        }
 
-    pub fn from_string(encoded: &str) -> Option<Self> {
-        let parts: Vec<&str> = encoded.split('§').collect();
-        if parts.len() != 3 { return None; }
-
-        let otp1_key = STANDARD.decode(parts[0]).ok()?;
-        let otp2_key = STANDARD.decode(parts[1]).ok()?;
-        let aes_password = parts[2].to_string();
-
-        Some(Self::new(otp1_key, otp2_key, aes_password))
-    }
-
-    pub fn to_string(&self) -> String {
-        format!("{}§{}§{}", STANDARD.encode(&self.otp1_key), STANDARD.encode(&self.otp2_key), self.aes_password)
+        let (iv, ciphertext) = encrypted_data.split_at(16);
+        let cipher = Aes256CbcDec::new_from_slices(key, iv).ok()?;
+        let mut buffer = ciphertext.to_vec();
+        cipher
+            .decrypt_padded_vec_mut::<Pkcs7>(&mut buffer)
+            .ok()
     }
 }
