@@ -37,8 +37,7 @@ pub struct ApiKey {
     pub key: String,
 }
 
-pub struct ApiBuilder<'a, U: IntoUrl>
-{
+pub struct ApiBuilder<'a, U: IntoUrl> {
     config: &'a Configuration,
     method: reqwest::Method,
     full_uri: U,
@@ -46,8 +45,7 @@ pub struct ApiBuilder<'a, U: IntoUrl>
     queries: Vec<(String, String)>,
 }
 
-impl<'a, U: IntoUrl> ApiBuilder<'a, U>
-{
+impl<'a, U: IntoUrl> ApiBuilder<'a, U> {
     pub fn new(config: &'a Configuration, method: reqwest::Method, full_uri: U) -> Self {
         ApiBuilder::<'a, U> {
             config,
@@ -84,7 +82,7 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U>
         E: DeserializeOwned,
     {
         // First, we need to create the request.
-        let final_url = self.full_uri.as_str();
+        let mut final_url: String = self.full_uri.as_str().to_string();
         let mut final_body = self
             .body
             .as_ref()
@@ -127,10 +125,12 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U>
                 // There is something in the body - we need to encrypt it as well.
                 final_body = Some(
                     secret
-                        .encrypt(&body[..])
+                        .encrypt(body.as_slice())
+                        .map(|x| STANDARD.encode(x).as_bytes().to_vec())
                         .ok_or(Error::Str("Failed to encrypt body!".into()))?,
                 );
             }
+            final_url = enc_url
         }
 
         // Finally, build the request and process.
@@ -150,6 +150,7 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U>
         };
         if let Some(body) = final_body {
             req_builder = req_builder.body(body);
+            req_builder = req_builder.header("Content-Type", "application/json");
         }
 
         let req = req_builder.build()?;
@@ -164,8 +165,12 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U>
             .ok_or(Error::Str("Failed to pull body".into()))?;
 
         if let Some(ref secret) = self.config.secret {
+            // We need to decode the body from base64.
+            let p_body = STANDARD
+                .decode(res_body.as_slice())
+                .map_err(|x| Error::Str("Failed to decode!".into()))?;
             res_body = secret
-                .decrypt(res_body.as_slice())
+                .decrypt(p_body.as_slice())
                 .ok_or(Error::Str("Failed to decrypt body!".into()))?;
         }
 
@@ -188,8 +193,6 @@ impl Configuration {
     pub fn new() -> Configuration {
         Configuration::default()
     }
-
-
 
     // pub async fn execute<
     //     'a,

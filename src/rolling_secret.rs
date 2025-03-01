@@ -5,17 +5,17 @@ use cbc::cipher::KeyIvInit;
 use cbc::{Decryptor, Encryptor};
 use hmac::{Hmac, Mac};
 use rand::seq::{IteratorRandom, SliceRandom};
-use rand::{Rng, SeedableRng, rng, rngs::StdRng, thread_rng};
-use rand::{RngCore, rngs::OsRng};
+use rand::rngs::{OsRng, StdRng};
+use rand::{rng, Rng, RngCore, SeedableRng};
 use sha2::Digest;
 use sha2::{Sha256, Sha512};
 use std::convert::TryInto;
+use std::str::Chars;
 use std::vec::Vec;
 use cbc::cipher::block_padding::Pkcs7;
 use totp_rs::Algorithm::SHA512;
 use totp_rs::{Secret, TOTP};
 
-const RANDOM_SEED: u64 = 364324876;
 const CHARACTERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
 
 type Aes256CbcEnc = Encryptor<Aes256>;
@@ -48,10 +48,14 @@ impl RollingSecret {
     }
 
     fn generate_password(length: usize) -> String {
+        let mut output: Vec<u8> = vec![];
+        let chars = CHARACTERS.to_string();
+        let b_chars = chars.as_bytes();
         let mut rng = rng();
-        (0..length)
-            .map(|_| *CHARACTERS.choose(&mut rng).unwrap() as char)
-            .collect()
+        for _ in 0..length {
+            output.push(b_chars[rng.random_range(0..CHARACTERS.len())]);
+        }
+        String::from_utf8(output).ok().unwrap_or("".into())
     }
 
     pub fn generate() -> Option<Self> {
@@ -105,10 +109,7 @@ impl RollingSecret {
     }
 
     fn get_shuffled_characters() -> String {
-        let mut rng = StdRng::seed_from_u64(RANDOM_SEED);
-        let mut chars: Vec<char> = CHARACTERS.chars().collect();
-        chars.shuffle(&mut rng);
-        chars.into_iter().collect()
+        CHARACTERS.to_string()
     }
 
     fn number_to_string(mut number: u64) -> String {
@@ -123,15 +124,12 @@ impl RollingSecret {
         result
     }
 
-    pub fn encrypt(data: &[u8], key: &[u8]) -> Option<Vec<u8>> {
-        if key.len() != 32 {
-            return None; // AES-256 requires a 32-byte key
-        }
-
+    pub fn encrypt(&self, data: &[u8]) -> Option<Vec<u8>> {
+        let key = self.rolling_key()?;
         let mut iv = [0u8; 16];
-        OsRng.fill_bytes(&mut iv); // Generate a random IV (same as C#)
+        rng().fill_bytes(&mut iv);
 
-        let cipher = Aes256CbcEnc::new_from_slices(key, &iv).ok()?;
+        let cipher = Aes256CbcEnc::new_from_slices(key.as_slice(), &iv).ok()?;
         let e_bytes = cipher.encrypt_padded_vec_mut::<Pkcs7>(data);
 
         let mut result = iv.to_vec();
@@ -140,13 +138,13 @@ impl RollingSecret {
     }
 
     /// Decrypts AES-256-CBC data, extracting the IV from the first 16 bytes
-    pub fn decrypt(encrypted_data: &[u8], key: &[u8]) -> Option<Vec<u8>> {
-        if key.len() != 32 || encrypted_data.len() < 16 {
+    pub fn decrypt(&self, encrypted_data: &[u8]) -> Option<Vec<u8>> {
+        if encrypted_data.len() < 16 {
             return None;
         }
-
+        let key = self.rolling_key()?;
         let (iv, ciphertext) = encrypted_data.split_at(16);
-        let cipher = Aes256CbcDec::new_from_slices(key, iv).ok()?;
+        let cipher = Aes256CbcDec::new_from_slices(key.as_slice(), iv).ok()?;
         let mut buffer = ciphertext.to_vec();
         cipher
             .decrypt_padded_vec_mut::<Pkcs7>(&mut buffer)
