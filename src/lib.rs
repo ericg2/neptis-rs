@@ -10,7 +10,7 @@ extern crate url;
 
 pub mod apis;
 pub mod models;
-mod rolling_secret;
+pub mod rolling_secret;
 
 #[cfg(test)]
 mod tests {
