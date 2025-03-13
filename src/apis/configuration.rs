@@ -168,7 +168,7 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U> {
             // We need to decode the body from base64.
             let p_body = STANDARD
                 .decode(res_body.as_slice())
-                .map_err(|x| Error::Str("Failed to decode!".into()))?;
+                .map_err(|_| Error::Str("Failed to decode!".into()))?;
             res_body = secret
                 .decrypt(p_body.as_slice())
                 .ok_or(Error::Str("Failed to decrypt body!".into()))?;
@@ -193,102 +193,6 @@ impl Configuration {
     pub fn new() -> Configuration {
         Configuration::default()
     }
-
-    // pub async fn execute<
-    //     'a,
-    //     JsonIn: Serialize,
-    //     QueryIn: Serialize + Sized,
-    //     U: IntoUrl,
-    //     E: Deserialize<'a>,
-    //     JsonOut: Deserialize<'a>,
-    // >(
-    //     &self,
-    //     method: reqwest::Method,
-    //     full_uri: U,
-    //     body: Option<JsonIn>,
-    //     queries: Option<QueryIn>,
-    // ) -> Result<JsonOut, Error<E>> {
-    //     // First, we need to create the request.
-    //     let mut final_url = full_uri.as_str();
-    //     let mut final_body = body.map(|x| serde_json::to_vec(&x)).transpose()?;
-    //
-    //     if let Some(ref secret) = self.secret {
-    //         let mut full_query = final_url.replace(self.base_path.as_str(), "".into());
-    //         full_query = full_query
-    //             .strip_prefix("/")
-    //             .unwrap_or(full_query.as_str())
-    //             .to_string();
-    //         if !full_query.starts_with("/api/") {
-    //             full_query = "/api/".to_string() + full_query.as_str();
-    //         }
-    //
-    //         // Finally, encrypt the data into the "secure api"
-    //         let enc_query = secret
-    //             .encrypt(full_query.as_bytes())
-    //             .map(|x| STANDARD.encode(x))
-    //             .ok_or("Failed to encrypt query".into())?;
-    //
-    //         let mut enc_url = self.base_path.replace("/api", "");
-    //         enc_url = enc_url
-    //             .strip_suffix("/")
-    //             .unwrap_or(enc_url.as_str())
-    //             .to_string();
-    //         enc_url += format!("/secure/{}", enc_query).as_str();
-    //
-    //         if let Some(body) = final_body {
-    //             // There is something in the body - we need to encrypt it as well.
-    //             final_body = Some(
-    //                 secret
-    //                     .encrypt(&body[..])
-    //                     .ok_or("Failed to encrypt body!".into())?,
-    //             );
-    //         }
-    //     }
-    //
-    //     // Finally, build the request and process.
-    //     let mut req_builder = self.client.request(method, final_url);
-    //     if let Some(u_queries) = queries {
-    //         req_builder = req_builder.query(u_queries);
-    //     }
-    //
-    //     if let Some(ref user_agent) = self.user_agent {
-    //         req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent.clone());
-    //     }
-    //     if let Some(ref token) = self.bearer_access_token {
-    //         req_builder = req_builder.bearer_auth(token.to_owned());
-    //     };
-    //     if let Some(body) = final_body {
-    //         req_builder = req_builder.body(body);
-    //     }
-    //
-    //     let req = req_builder.build()?;
-    //     let res = self.client.execute(req).await?;
-    //     let mut res_body = res
-    //         .bytes()
-    //         .await
-    //         .ok()
-    //         .map(|x| x.to_vec())
-    //         .ok_or(Error::from)?;
-    //     if let Some(ref secret) = self.secret {
-    //         res_body = secret
-    //             .decrypt(&res_body[..])
-    //             .ok_or("Failed to decrypt body!".into())?;
-    //     }
-    //
-    //     let status = res.status();
-    //     if !status.is_client_error() && !status.is_server_error() {
-    //         // We need to convert the output to JSON and return.
-    //         let json_res: JsonOut = serde_json::from_slice(&res_body[..])?;
-    //         Ok(json_res)
-    //     } else {
-    //         let entity: Option<E> = serde_json::from_slice(&res_body.as_slice()).ok();
-    //         Err(Error::ResponseError(ResponseContent {
-    //             status,
-    //             content: String::from_utf8(res_body).unwrap_or(String::new()),
-    //             entity,
-    //         }))
-    //     }
-    // }
 }
 
 impl Default for Configuration {

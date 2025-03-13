@@ -19,12 +19,16 @@ pub struct FileDto {
     pub modify_date: Option<String>,
     #[serde(rename = "createDate", skip_serializing_if = "Option::is_none")]
     pub create_date: Option<String>,
+    #[serde(rename = "level", skip_serializing_if = "Option::is_none")]
+    pub level: Option<i64>,
+
     #[serde(rename = "sizeBytes", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<Option<i64>>,
     #[serde(rename = "name", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub name: Option<Option<String>>,
     #[serde(rename = "path", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
     pub path: Option<Option<String>>,
+
     #[serde(rename = "isDirectory", skip_serializing_if = "Option::is_none")]
     pub is_directory: Option<bool>,
 }
@@ -39,6 +43,7 @@ impl FileDto {
             name: None,
             path: None,
             is_directory: None,
+            level: None
         }
     }
 }
