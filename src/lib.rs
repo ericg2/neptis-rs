@@ -11,6 +11,7 @@ extern crate url;
 pub mod apis;
 pub mod models;
 pub mod rolling_secret;
+pub mod error;
 
 #[cfg(test)]
 mod tests {
