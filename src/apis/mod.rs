@@ -1,62 +1,53 @@
 use std::error;
 use std::fmt;
 
-#[derive(Debug, Clone)]
-pub struct ResponseContent<T> {
-    pub status: reqwest::StatusCode,
-    pub content: String,
-    pub entity: Option<T>,
-}
 
 #[derive(Debug)]
-pub enum Error<T> {
-    Reqwest(reqwest::Error),
+pub enum NeptisError {
+    Api(reqwest::Error),
     Serde(serde_json::Error),
     Io(std::io::Error),
-    ResponseError(ResponseContent<T>),
     Str(String)
 }
 
-impl <T> fmt::Display for Error<T> {
+impl fmt::Display for NeptisError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (module, e) = match self {
-            Error::Reqwest(e) => ("reqwest", e.to_string()),
-            Error::Serde(e) => ("serde", e.to_string()),
-            Error::Io(e) => ("IO", e.to_string()),
-            Error::ResponseError(e) => ("response", format!("status code {}", e.status)),
-            Error::Str(e) => ("custom", e.to_string())
+            NeptisError::Api(e) => ("reqwest", e.to_string()),
+            NeptisError::Serde(e) => ("serde", e.to_string()),
+            NeptisError::Io(e) => ("IO", e.to_string()),
+            NeptisError::Str(e) => ("custom", e.to_string())
         };
         write!(f, "error in {}: {}", module, e)
     }
 }
 
-impl <T: fmt::Debug> error::Error for Error<T> {
+impl error::Error for NeptisError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         Some(match self {
-            Error::Reqwest(e) => e,
-            Error::Serde(e) => e,
-            Error::Io(e) => e,
-            Error::Str(_) => return None,
-            Error::ResponseError(_) => return None,
+            NeptisError::Api(e) => e,
+            NeptisError::Serde(e) => e,
+            NeptisError::Io(e) => e,
+            NeptisError::Str(_) => return None,
         })
     }
 }
 
-impl <T> From<reqwest::Error> for Error<T> {
+impl From<reqwest::Error> for NeptisError {
     fn from(e: reqwest::Error) -> Self {
-        Error::Reqwest(e)
+        NeptisError::Api(e)
     }
 }
 
-impl <T> From<serde_json::Error> for Error<T> {
+impl From<serde_json::Error> for NeptisError {
     fn from(e: serde_json::Error) -> Self {
-        Error::Serde(e)
+        NeptisError::Serde(e)
     }
 }
 
-impl <T> From<std::io::Error> for Error<T> {
+impl From<std::io::Error> for NeptisError {
     fn from(e: std::io::Error) -> Self {
-        Error::Io(e)
+        NeptisError::Io(e)
     }
 }
 
@@ -93,16 +84,6 @@ pub fn parse_deep_object(prefix: &str, value: &serde_json::Value) -> Vec<(String
     unimplemented!("Only objects are supported with style=deepObject")
 }
 
-pub mod auth_api;
-pub mod auto_job_api;
-pub mod config_api;
-pub mod data_api;
-pub mod info_api;
-pub mod job_api;
-pub mod log_api;
-pub mod message_api;
-pub mod notification_api;
-pub mod repo_api;
-pub mod user_api;
 
-pub mod configuration;
+pub mod dtos;
+pub mod api;

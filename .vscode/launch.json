@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Debug in External Terminal",
+        "type": "lldb",
+        "request": "launch",
+        "program": "${workspaceFolder}/target/debug/neptis-rs",
+        "args": [],
+        "cwd": "${workspaceFolder}",
+        "terminal": "external",  // <-- This line opens an external terminal
+        "sourceLanguages": ["rust"]
+      }
+    ]
+  }

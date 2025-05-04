@@ -3,6 +3,7 @@ use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyInit};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use cbc::cipher::KeyIvInit;
 use cbc::{Decryptor, Encryptor};
+use chrono::Utc;
 use hmac::{Hmac, Mac};
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::rngs::{OsRng, StdRng};
@@ -16,10 +17,18 @@ use cbc::cipher::block_padding::Pkcs7;
 use totp_rs::Algorithm::SHA512;
 use totp_rs::{Secret, TOTP};
 
-const CHARACTERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
+const CHARACTERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 type Aes256CbcEnc = Encryptor<Aes256>;
 type Aes256CbcDec = Decryptor<Aes256>;
+
+impl ToString for RollingSecret {
+    fn to_string(&self) -> String {
+        let otp_a_key = STANDARD.encode(self.otp_a.secret.as_slice());
+        let otp_b_key = STANDARD.encode(self.otp_b.secret.as_slice());
+        format!("{}§{}§{}", otp_a_key, otp_b_key, self.aes_password)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RollingSecret {
@@ -84,8 +93,9 @@ impl RollingSecret {
     }
 
     pub fn rolling_key(&self) -> Option<Vec<u8>> {
-        let otp1 = self.otp_a.generate_current().ok()?.parse::<i64>().ok()?;
-        let otp2 = self.otp_b.generate_current().ok()?.parse::<i64>().ok()?;
+        let now = Utc::now().timestamp() as u64;
+        let otp1 = self.otp_a.generate(now).parse::<i64>().ok()?;
+        let otp2 = self.otp_b.generate(now).parse::<i64>().ok()?;
         let otp = otp1 as u64 * otp2 as u64;
         let password = self.scramble_password(&self.aes_password, otp)?;
         Some(Sha256::digest(password.as_bytes()).to_vec())
