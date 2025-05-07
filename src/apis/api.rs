@@ -393,12 +393,11 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U> {
 
         // Attempt to do the request several times due to encryption.
         let mut ret = Err(NeptisError::Str("Failed to send request".into()));
-        for _ in 0..5 {
+        for _ in 0..2 {
             ret = do_full_req().await;
             if ret.is_ok() {
                 break;
             }
-            thread::sleep(Duration::from_secs(2))
         }
         ret
     }
@@ -491,7 +490,10 @@ impl WebApi {
             password: password.into(),
             config: WebApiConfig {
                 base_url: base_path.into(),
-                client: Client::new(),
+                client: Client::builder()
+                    .timeout(Duration::from_secs(3))
+                    .build()
+                    .unwrap(),
                 secret,
                 user_agent: None,
                 auth: RwLock::new(None),

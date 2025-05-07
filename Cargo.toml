@@ -1,7 +1,16 @@
 [package]
 name = "neptis-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+repository = "https://github.com/ericg2/neptis-rs"
+authors = ["Eric E. Gold <littlelettere@gmail.com>"]
+description = "The Future of Backup and Control"
+license = "GPLv3"
+readme = "README.md"
+homepage = "https://ericg2.github.io"
+keywords = ["gui", "neptis", "tool"]
+categories = ["command-line-utilities"]
+
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -30,11 +39,44 @@ cron-lingo = "0.4"
 sha1 = "0.10.6"
 totp-lite = "2.0.1"
 regex = "1"
-fuse_mt = "0.6"
 libc = "*"
 log = "0.4"
 dirs-next = "2"
-fuser = "0.13.0"
 lru = "0.14.0"
 moka = { version = "0.12.10", features = ["sync"] }
 flume = "0.11"
+itertools = "0.14"
+indexmap = "2"
+
+[package.metadata.bundle]
+name = "Neptis"
+identifier = "com.ericg2.neptisfe"
+icon = ["icons/web/icon-192.png", "icons/web/icon-512.png"]
+resources = ["icons/**/*.png"]
+copyright = "Copyright (c) Eric E. Gold 2025. All rights reserved."
+category = "public.app-category.business"
+short_description = "The Future of Backup and Control"
+long_description = """
+Enjoy lightning speed RESTIC-powered backups, advanced
+permission handling, and high-security file access 
+on ALL platforms with the power of a hosted Neptis Server.
+"""
+deb_depends = ["fuse3", "libfuse3-dev"]
+osx_frameworks = ["SDL2"]
+osx_url_schemes = ["com.ericg2.neptisfe"]
+linux_use_terminal = true
+
+[package.metadata.wix]
+upgrade-guid = "9185F821-9B3C-4F50-8B0A-BF563D14ED35"
+path-guid = "26979834-DCCF-4816-9F68-EB5E900E1DAE"
+license = false
+eula = false
+
+[target.'cfg(unix)'.dependencies]
+fuse_mt = "0.6"
+fuser = "0.13"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

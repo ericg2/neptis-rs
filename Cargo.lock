@@ -1156,6 +1156,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1345,7 +1354,7 @@ dependencies = [
 
 [[package]]
 name = "neptis-rs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "base64",
@@ -1361,7 +1370,9 @@ dependencies = [
  "fuse_mt",
  "fuser",
  "hmac",
+ "indexmap 2.9.0",
  "inquire",
+ "itertools 0.14.0",
  "libc",
  "log",
  "lru",
@@ -1847,7 +1858,7 @@ dependencies = [
  "anyhow",
  "clap",
  "glob",
- "itertools",
+ "itertools 0.10.5",
  "once_cell",
  "quote",
  "regex",

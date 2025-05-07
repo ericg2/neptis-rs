@@ -1,15 +1,17 @@
 use base64::{Engine, prelude::BASE64_STANDARD};
 use flume::{Receiver, RecvError, SendError, Sender, bounded};
-use fuse_mt::{CreatedEntry, DirectoryEntry, FileType, FilesystemMT};
+use inquire::{Confirm, Select};
 use moka::{
     PredicateError,
     sync::{Cache, PredicateId},
 };
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::{
     collections::{HashMap, VecDeque},
     ffi::OsStr,
     fs::OpenOptions,
+    iter::once_with,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
     time::{Duration, SystemTime},
@@ -22,10 +24,7 @@ use crate::{
         dtos::{NodeDto, PostForFileApi, PutForFileApi},
     },
     from_dto_time, to_dto_time,
-};
-use fuse_mt::{
-    CallbackResult, FileAttr, RequestInfo, ResultCreate, ResultEmpty, ResultEntry, ResultOpen,
-    ResultReaddir, ResultSlice, ResultWrite,
+    ui::file_size::FileSize,
 };
 
 pub struct NeptisFS {
@@ -36,9 +35,57 @@ pub struct NeptisFS {
 }
 
 #[derive(Clone, Debug)]
-struct FsNode {
-    path: PathBuf,
-    attr: FileAttr,
+pub struct FsNode {
+    pub path: PathBuf,
+    pub attr: GenericFileAttr,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum GenericFileType {
+    /// Named pipe (S_IFIFO)
+    NamedPipe,
+    /// Character device (S_IFCHR)
+    CharDevice,
+    /// Block device (S_IFBLK)
+    BlockDevice,
+    /// Directory (S_IFDIR)
+    Directory,
+    /// Regular file (S_IFREG)
+    RegularFile,
+    /// Symbolic link (S_IFLNK)
+    Symlink,
+    /// Unix domain socket (S_IFSOCK)
+    Socket,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct GenericFileAttr {
+    /// Size in bytes
+    pub size: u64,
+    /// Size in blocks
+    pub blocks: u64,
+    /// Time of last access
+    pub atime: SystemTime,
+    /// Time of last modification
+    pub mtime: SystemTime,
+    /// Time of last metadata change
+    pub ctime: SystemTime,
+    /// Time of creation (macOS only)
+    pub crtime: SystemTime,
+    /// Kind of file (directory, file, pipe, etc.)
+    pub kind: GenericFileType,
+    /// Permissions
+    pub perm: u16,
+    /// Number of hard links
+    pub nlink: u32,
+    /// User ID
+    pub uid: u32,
+    /// Group ID
+    pub gid: u32,
+    /// Device ID (if special file)
+    pub rdev: u32,
+    /// Flags (macOS only; see chflags(2))
+    pub flags: u32,
 }
 
 const BLOCK_SIZE: u64 = 4096;
@@ -84,15 +131,15 @@ impl NeptisFS {
             .invalidate_entries_if(move |x, _| x.starts_with(&p2));
     }
 
-    fn generic_dir_attr() -> FileAttr {
-        FileAttr {
+    fn generic_dir_attr() -> GenericFileAttr {
+        GenericFileAttr {
             size: 0,
             blocks: 0,
             atime: SystemTime::now(),
             mtime: SystemTime::now(),
             ctime: SystemTime::now(),
             crtime: SystemTime::now(),
-            kind: FileType::Directory,
+            kind: GenericFileType::Directory,
             perm: 0o755,
             nlink: 2,
             uid: 1000,
@@ -101,8 +148,8 @@ impl NeptisFS {
             flags: 0,
         }
     }
-    fn to_attr(node: &NodeDto) -> FileAttr {
-        FileAttr {
+    fn to_attr(node: &NodeDto) -> GenericFileAttr {
+        GenericFileAttr {
             size: node.bytes,
             blocks: node.bytes / BLOCK_SIZE,
             atime: from_dto_time!(node.atime),
@@ -110,9 +157,9 @@ impl NeptisFS {
             ctime: from_dto_time!(node.ctime),
             crtime: from_dto_time!(node.ctime),
             kind: if node.is_dir {
-                FileType::Directory
+                GenericFileType::Directory
             } else {
-                FileType::RegularFile
+                GenericFileType::RegularFile
             },
             perm: 0o755,
             nlink: 2,
@@ -123,7 +170,7 @@ impl NeptisFS {
         }
     }
 
-    fn try_find(&self, path: &Path) -> Result<FsNode, i32> {
+    pub fn do_find(&self, path: &Path) -> Result<FsNode, i32> {
         if path.parent().is_none() {
             return Ok(FsNode {
                 path: path.to_path_buf(),
@@ -133,7 +180,7 @@ impl NeptisFS {
         let def = PathBuf::from("/");
         let parent = path.parent().unwrap_or(&def);
         let name = path.file_name().ok_or(libc::ENOENT)?;
-        self.do_lookup(parent)
+        self.do_readdir(parent)
             .ok_or(libc::ENETUNREACH)?
             .into_iter()
             .find(|x| x.path == name)
@@ -141,7 +188,7 @@ impl NeptisFS {
     }
 
     // WORKING 5-3-25
-    fn do_lookup(&self, path: &Path) -> Option<Vec<FsNode>> {
+    pub fn do_readdir(&self, path: &Path) -> Option<Vec<FsNode>> {
         let mut output = Vec::new();
 
         // Always include "." and ".." entries (relative paths)
@@ -216,7 +263,7 @@ impl NeptisFS {
         Some(output)
     }
 
-    fn do_dump(&self, path: &Path, offset: u64, size: u32) -> Option<Arc<Vec<u8>>> {
+    pub fn do_dump(&self, path: &Path, offset: u64, size: usize) -> Option<Arc<Vec<u8>>> {
         match self.cache_dump.get(path) {
             Some(ret) => Some(ret),
             None => {
@@ -319,16 +366,59 @@ impl NeptisFS {
     }
 }
 
+#[cfg(unix)]
+use fuse_mt::{
+    CallbackResult, CreatedEntry, DirectoryEntry, FileAttr, FileType, FilesystemMT, RequestInfo,
+    ResultCreate, ResultEmpty, ResultEntry, ResultOpen, ResultReaddir, ResultSlice, ResultWrite,
+};
+
+#[cfg(unix)]
+impl From<GenericFileType> for FileType {
+    fn from(value: GenericFileType) -> Self {
+        match value {
+            GenericFileType::BlockDevice => Self::BlockDevice,
+            GenericFileType::CharDevice => Self::CharDevice,
+            GenericFileType::Directory => Self::Directory,
+            GenericFileType::NamedPipe => Self::NamedPipe,
+            GenericFileType::RegularFile => Self::RegularFile,
+            GenericFileType::Socket => Self::Socket,
+            GenericFileType::Symlink => Self::Symlink,
+        }
+    }
+}
+
+#[cfg(unix)]
+impl From<GenericFileAttr> for FileAttr {
+    fn from(value: GenericFileAttr) -> Self {
+        FileAttr {
+            size: value.size,
+            blocks: value.blocks,
+            atime: value.atime,
+            mtime: value.mtime,
+            ctime: value.ctime,
+            crtime: value.crtime,
+            kind: value.kind.into(),
+            perm: value.perm,
+            nlink: value.nlink,
+            uid: value.uid,
+            gid: value.gid,
+            rdev: value.rdev,
+            flags: value.flags,
+        }
+    }
+}
+
+#[cfg(unix)]
 impl FilesystemMT for NeptisFS {
     fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
         // Attempt to read the entire directory.
         let ret = self
-            .do_lookup(path)
+            .do_readdir(path)
             .map(|y| {
                 y.into_iter()
                     .map(|x| DirectoryEntry {
                         name: x.path.into_os_string(),
-                        kind: x.attr.kind,
+                        kind: x.attr.kind.into(),
                     })
                     .collect::<Vec<_>>()
             })
@@ -337,7 +427,7 @@ impl FilesystemMT for NeptisFS {
     }
 
     fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
-        self.try_find(path).map(|x| (FS_DURATION, x.attr))
+        self.do_find(path).map(|x| (FS_DURATION, x.attr.into()))
     }
 
     fn read(
@@ -349,7 +439,7 @@ impl FilesystemMT for NeptisFS {
         size: u32,
         callback: impl FnOnce(ResultSlice<'_>) -> CallbackResult,
     ) -> CallbackResult {
-        if let Some(full_data) = self.do_dump(path, 0, usize::MAX as u32) {
+        if let Some(full_data) = self.do_dump(path, 0, usize::MAX) {
             let start = offset as usize;
             let end = (start + size as usize).min(full_data.len());
             if start >= full_data.len() {
@@ -422,9 +512,9 @@ impl FilesystemMT for NeptisFS {
     ) -> ResultCreate {
         let path = parent.join(name);
         self.do_create(&path, false).ok_or(libc::ENETUNREACH)?;
-        self.try_find(&path).map(|x| CreatedEntry {
+        self.do_find(&path).map(|x| CreatedEntry {
             ttl: FS_DURATION,
-            attr: x.attr,
+            attr: x.attr.into(),
             fh: 42,
             flags,
         })
@@ -482,7 +572,7 @@ impl FilesystemMT for NeptisFS {
     fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, _mode: u32) -> ResultEntry {
         let path = parent.join(name);
         self.do_create(&path, true).ok_or(libc::ENETUNREACH)?;
-        self.try_find(&path).map(|x| (FS_DURATION, x.attr))
+        self.do_find(&path).map(|x| (FS_DURATION, x.attr.into()))
     }
 
     fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {

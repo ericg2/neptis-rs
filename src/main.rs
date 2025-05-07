@@ -24,10 +24,9 @@ use arduino_secret::ArduinoSecret;
 use chrono::{Local, Utc};
 use cron::Schedule;
 use filesystem::NeptisFS;
-use fuser::BackgroundSession;
 use inquire::Editor;
 use reqwest::ClientBuilder;
-use ui::file_browser::TreeBrowser;
+use ui::browser::FileBrowser;
 use uuid::Uuid;
 use std::ffi::OsStr;
 use std::process;
@@ -76,10 +75,17 @@ impl ToShortIdString for InternalMountDto {
     }
 }
 
+#[cfg(unix)]
 struct UiApp {
     rt: Arc<Runtime>,
     api: Arc<RwLock<Option<WebApi>>>,
-    fuse: Mutex<Option<BackgroundSession>>,
+    fuse: Mutex<Option<fuser::BackgroundSession>>,
+}
+
+#[cfg(not(unix))]
+struct UiApp {
+    rt: Arc<Runtime>,
+    api: Arc<RwLock<Option<WebApi>>>,
 }
 
 static DEFAULT_PASS: &'static str = "default123";
@@ -1637,17 +1643,6 @@ impl UiApp {
         self.show_dashboard();
     }
 
-    fn show_browser(&self) {
-        // We need to lock the API, then return the file browsing instance.
-        {
-            let m_api = &*self.api.read().unwrap();
-            if let Some(api) = m_api {
-                let _ = TreeBrowser::new(api, &self.rt).run();
-            }
-        }
-        self.show_dashboard();
-    }
-
     fn show_smb(&self) {
         clearscreen::clear().expect("Expected to clear screen!");
         match {
@@ -1712,6 +1707,15 @@ impl UiApp {
         self.show_dashboard();
     }
 
+    #[cfg(not(unix))]
+    fn start_fuse(&self) {
+        clearscreen::clear().expect("Expected to clear screen!");
+        println!("*** FUSE is not available on your platform. Please use SMB or the built-in browser instead.");
+        thread::sleep(Duration::from_secs(3));
+        self.show_dashboard();
+    }
+
+    #[cfg(unix)]
     fn start_fuse(&self) {
         loop {
             clearscreen::clear().expect("Expected to clear screen!");
@@ -1772,22 +1776,25 @@ impl UiApp {
         self.show_dashboard();
     }
     
+    fn start_browser(&self) {
+        FileBrowser::new(NeptisFS::new(self.api.clone(), self.rt.clone())).show_browser();
+        self.show_dashboard();
+    }
 
     // inspected
     fn show_dashboard(&self) {
         use crossterm::{
             event::{self, Event},
-            terminal::{disable_raw_mode, enable_raw_mode},
+            terminal::{disable_raw_mode},
         };
         use std::{
             io::Write,
             process, thread,
             time::{Duration, Instant},
         };
-
     
+        const STR_BROWSER: &str = "File Browser";
         const STR_FUSE: &str = "Start FUSE";
-        const STR_BROWSE: &str = "File Browser";
         const STR_BREAKDOWN: &str = "Show Usage Breakdown";
         const STR_POINTS: &str = "Manage Points";
         const STR_USERS: &str = "Manage Users";
@@ -1851,8 +1858,8 @@ impl UiApp {
             "Please select an action",
             vec![
                 STR_BACK,
+                STR_BROWSER,
                 STR_FUSE,
-                STR_BROWSE,
                 STR_BREAKDOWN,
                 STR_POINTS,
                 STR_USERS,
@@ -1865,9 +1872,9 @@ impl UiApp {
         .prompt()
         .expect("Failed to show prompt!")
         {
+            STR_BROWSER => self.start_browser(),
             STR_FUSE => self.start_fuse(),
             STR_BREAKDOWN => self.show_point_breakdown(),
-            STR_BROWSE => self.show_browser(),
             STR_POINTS => self.show_points(),
             STR_USERS => self.show_users(),
             STR_SYSTEM => self.show_system(),
@@ -1945,7 +1952,9 @@ impl UiApp {
             if let Some(a_endpoint) = server.arduino_endpoint {
                 if let Some(a_pass) = server.arduino_password {
                     println!("Initial connection failed. Attempting to wake up PC...");
-                    if let Err(e) = (||{
+
+                    let ep = a_endpoint.as_str();
+                    let a_func = || {
                         let key = ArduinoSecret::from_string(a_pass.as_str())
                             .ok_or(
                                 "Failed to parse Arduino Key".to_string(),
@@ -1958,7 +1967,7 @@ impl UiApp {
                             .build()
                             .map(|x| {
                                 self.rt.block_on(async move {
-                                    x.post(format!("{}/{}", a_endpoint, "start"))
+                                    x.post(format!("{}/{}", ep, "start"))
                                         .bearer_auth(key.to_string())
                                         .send()
                                         .await
@@ -1974,8 +1983,18 @@ impl UiApp {
                             .map_err(|e|
                                 format!("Arduino returned error upon submission: {}", e),
                             ).map(|_|())
-                    })() {
-                        println!("*** Failed to send Arduino signal: {}", e);
+                    };
+
+                    for _ in 0..3 {
+                        match a_func() {
+                            Ok(_) => { 
+                                println!("Successfully sent signal. Waiting 15 seconds to boot..."); 
+                                thread::sleep(Duration::from_secs(15)); 
+                                break; 
+                            },
+                            Err(e) => println!("Failed to send signal: {e}. Trying again...")
+                        }
+                        thread::sleep(Duration::from_secs(2));
                     }
                     // No matter what - try one more time in-case something works now.
                     ret = raw_connect_func();
@@ -2001,7 +2020,6 @@ impl UiApp {
 
     pub fn begin(&self) {
         clearscreen::clear().unwrap();
-        println!("Neptis Login");
         fn format_slash(s: &str) -> String {
             s.strip_suffix("/").unwrap_or(s).to_string()
         }
@@ -2130,6 +2148,10 @@ impl UiApp {
                 ],
                 Box::new(|_| ServerItem::load_servers()),
             )
+            .with_select_title(format!(
+                "Neptis Front End v{}\nCopyright (c) 2025 Eric E. Gold\nThis software is licensed under GPLv3\n",
+                env!("CARGO_PKG_VERSION")
+            ))
             .with_modify(Box::new(|_, servers, serv| {
                 let mut m_servers = servers.clone();
                 if let Some(u_serv) = m_servers
@@ -2152,11 +2174,20 @@ impl UiApp {
     }
 
 
+    #[cfg(unix)]
     pub fn new() -> UiApp {
         UiApp {
             rt: Arc::new(Runtime::new().expect("Failed to start runtime!")),
             api: Arc::new(RwLock::new(None)),
             fuse: Mutex::new(None),
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn new() -> UiApp {
+        UiApp {
+            rt: Arc::new(Runtime::new().expect("Failed to start runtime!")),
+            api: Arc::new(RwLock::new(None)),
         }
     }
 }
