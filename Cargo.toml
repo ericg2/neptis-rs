@@ -12,6 +12,7 @@ keywords = ["gui", "neptis", "tool"]
 categories = ["command-line-utilities"]
 
 
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_repr = "0.1"
