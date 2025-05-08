@@ -1,0 +1,4 @@
+- name: Install FUSE 2 and FUSE 3
+  run: |
+    sudo apt-get update
+    sudo apt-get install -y libfuse-dev fuse libfuse3-dev fuse3

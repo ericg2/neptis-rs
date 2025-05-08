@@ -128,6 +128,10 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - name: "Install FUSE 2 and FUSE 3"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse-dev fuse libfuse3-dev fuse3
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest

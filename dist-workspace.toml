@@ -1,19 +1,21 @@
 [workspace]
 members = ["cargo:."]
 
-[workspace.metadata.dist.dependencies.apt]
-fuse = "*"
-fuse3 = "*"
-libfuse3-dev = "*"
-libfuse-dev = "*"
-pkg-config = "*"
 
 
-[workspace.metadata.dist.dependencies.homebrew]
-macfuse = "*"
-osxfuse = "*"
-fuse = "*"
-pkg-config = "*"
+# [workspace.metadata.dist.dependencies.apt]
+# fuse = "*"
+# fuse3 = "*"
+# libfuse3-dev = "*"
+# libfuse-dev = "*"
+# pkg-config = "*"
+
+
+# [workspace.metadata.dist.dependencies.homebrew]
+# macfuse = "*"
+# osxfuse = "*"
+# fuse = "*"
+# pkg-config = "*"
 
 
 # Config for 'dist'
@@ -29,21 +31,22 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program
-install-updater = true
+install-updater = false
+github-build-setup = "build-setup.yml"
 
-[dependencies.homebrew]
-macfuse = "*"
-osxfuse = "*"
-fuse = "*"
-pkg-config = "*"
+# [dependencies.homebrew]
+# macfuse = "*"
+# osxfuse = "*"
+# fuse = "*"
+# pkg-config = "*"
 
-[dependencies.apt]
-fuse = "*"
-fuse3 = "*"
-libfuse3-dev = "*"
-libfuse-dev = "*"
-pkg-config = "*"
+# [dependencies.apt]
+# fuse = "*"
+# fuse3 = "*"
+# libfuse3-dev = "*"
+# libfuse-dev = "*"
+# pkg-config = "*"
 
-[dist.github-custom-runners]
-x86_64-unknown-linux-gnu = "ubuntu-latest"
-x86_64-pc-windows-msvc = "windows-latest"
+# [dist.github-custom-runners]
+# x86_64-unknown-linux-gnu = "ubuntu-latest"
+# x86_64-pc-windows-msvc = "windows-latest"
