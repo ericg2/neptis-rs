@@ -1,4 +1,5 @@
-- name: Install FUSE 2 and FUSE 3
+- name: Install FUSE (Linux only)
+  if: runner.os == 'Linux'
   run: |
     sudo apt-get update
-    sudo apt-get install -y libfuse-dev fuse libfuse3-dev fuse3
+    sudo apt-get install -y libfuse3-dev fuse3
