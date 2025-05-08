@@ -30,7 +30,6 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = true
-pr-run-mode = "upload"
 
 [dependencies.homebrew]
 macfuse = "*"
@@ -44,3 +43,7 @@ fuse3 = "*"
 libfuse3-dev = "*"
 libfuse-dev = "*"
 pkg-config = "*"
+
+[dist.github-custom-runners]
+x86_64-unknown-linux-gnu = "ubuntu-latest"
+x86_64-pc-windows-msvc = "windows-latest"

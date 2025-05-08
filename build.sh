@@ -1,4 +1,3 @@
 #!/bin/bash
 cargo clean
-cargo build --release --target x86_64-pc-windows-gnu
-cargo build --release --target x86_64-unknown-linux-gnu
+dist build --target x86_64-pc-windows-msvc --target x86_64-unknown-linux-gnu
