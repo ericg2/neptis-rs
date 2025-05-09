@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use sqlx::{
     Sqlite, SqlitePool,
     migrate::MigrateDatabase,
@@ -8,12 +10,12 @@ use tokio::runtime::Runtime;
 
 use super::server::ServerItem;
 
-pub struct DbController<'a> {
-    rt: &'a Runtime,
+pub struct DbController {
+    rt: Arc<Runtime>,
     pool: SqlitePool,
 }
 
-impl<'a> DbController<'a> {
+impl DbController {
     pub async fn save_server(&self, server: &ServerItem) -> Result<(), sqlx::Error> {
         // Run an update if we need to first
         if sqlx::query!(
@@ -138,10 +140,10 @@ impl<'a> DbController<'a> {
             .block_on(async move { self.delete_server(name).await })
     }
 
-    pub fn new(rt: &'a Runtime, path: &str) -> Self {
+    pub fn new(rt: Arc<Runtime>, path: &str) -> Self {
         let url = format!("sqlite://{}", path);
         Self {
-            rt,
+            rt: rt.clone(),
             pool: {
                 rt.block_on(async move {
                     if !Sqlite::database_exists(&url).await.unwrap_or(false) {

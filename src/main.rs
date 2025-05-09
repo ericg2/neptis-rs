@@ -83,7 +83,7 @@ struct UiApp {
     rt: Arc<Runtime>,
     api: Arc<RwLock<Option<WebApi>>>,
     fuse: Mutex<Option<fuser::BackgroundSession>>,
-    db: Option<String>,
+    db: DbController,
     mnt: Option<String>,
 }
 
@@ -91,7 +91,7 @@ struct UiApp {
 struct UiApp {
     rt: Arc<Runtime>,
     api: Arc<RwLock<Option<WebApi>>>,
-    db: Option<String>,
+    db: DbController,
 }
 
 static DEFAULT_PASS: &'static str = "default123";
@@ -1092,7 +1092,7 @@ impl UiApp {
         self.show_users();
     }
 
-    fn get_luser_stats(&self, api: &WebApi, is_breakdown: bool) -> String {
+    fn get_luser_stats(&self, api: &WebApi, is_breakdown: bool) -> (String, bool) {
         if let Ok(user) = {
             self.rt
                 .block_on(async { api.get_one_user(api.get_username().as_str()).await })
@@ -1169,14 +1169,17 @@ impl UiApp {
                     })
                 })
                 .unwrap_or("Failed to calculate Data Total File Usage".into());
-            format!(
-                "Logged in as {}\nPrivledged: {}\n{}",
-                user.user_name.as_str(),
-                if user.is_admin { "Yes" } else { "No" },
-                usage_str
+            (
+                format!(
+                    "Logged in as {}\nPrivledged: {}\n{}",
+                    user.user_name.as_str(),
+                    if user.is_admin { "Yes" } else { "No" },
+                    usage_str
+                ),
+                user.is_admin,
             )
         } else {
-            "Failed to calculate User Information".into()
+            ("Failed to calculate User Information".into(), false)
         }
     }
 
@@ -1187,7 +1190,7 @@ impl UiApp {
             if let Some(api) = m_api {
                 // Attempt to pull the maximum user statistics
                 let stats = self.get_luser_stats(api, false);
-                println!("{}\n", stats.as_str());
+                println!("{}\n", stats.0.as_str());
                 ModelManager::new(
                     Some(api),
                     vec![
@@ -1295,8 +1298,8 @@ impl UiApp {
                         })
                     }),
                 )
-                .with_create_title(stats.clone())
-                .with_modify_title(stats.clone())
+                .with_create_title(stats.0.clone())
+                .with_modify_title(stats.0.clone())
                 .with_back()
                 .with_delete(Box::new(|ctx, dto| {
                     let api = ctx
@@ -1766,7 +1769,7 @@ impl UiApp {
                 let m_api = &*self.api.read().unwrap();
                 if let Some(api) = m_api {
                     println!("Connection: {}\n", api.to_string());
-                    println!("{}", self.get_luser_stats(api, true));
+                    println!("{}", self.get_luser_stats(api, true).0);
                 } else {
                     println!("Failed to load additional statistics.");
                 }
@@ -1889,7 +1892,23 @@ impl UiApp {
     }
 
     #[cfg(unix)]
-    fn start_fuse(&self) {
+    fn start_fuse(&self, auto: bool) {
+        use std::path::{Path, PathBuf};
+        pub fn unmount_if_stale<P: AsRef<Path>>(path: P) {
+            let path_ref = path.as_ref();
+
+            if let Err(e) = fs::read_dir(path_ref) {
+                if e.to_string()
+                    .contains("Transport endpoint is not connected")
+                {
+                    // Try lazy unmount
+                    let _ = std::process::Command::new("umount")
+                        .arg("-l")
+                        .arg(path_ref)
+                        .status();
+                }
+            }
+        }
         loop {
             clearscreen::clear().expect("Expected to clear screen!");
             let mnt = {
@@ -1903,26 +1922,31 @@ impl UiApp {
             };
 
             if let Some(mnt) = mnt {
-                println!("\n*** FUSE is connected to {}", mnt);
-
-                if Confirm::new("Do you want to disable FUSE")
-                    .with_default(false)
-                    .prompt_skippable()
-                    .expect("Failed to show prompt!")
-                    .unwrap_or(false)
-                {
-                    let mut fuse_guard = self.fuse.lock().unwrap();
-                    *fuse_guard = None;
-                } else {
+                if auto {
                     break;
+                } else {
+                    println!("\n*** FUSE is connected to {}", mnt);
+
+                    if Confirm::new("Do you want to disable FUSE")
+                        .with_default(false)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        .unwrap_or(false)
+                    {
+                        let mut fuse_guard = self.fuse.lock().unwrap();
+                        *fuse_guard = None;
+                    } else {
+                        break;
+                    }
                 }
             } else {
                 println!("*** FUSE is not enabled.");
-                if Confirm::new("Do you want to enable FUSE")
-                    .with_default(false)
-                    .prompt_skippable()
-                    .expect("Failed to show prompt!")
-                    .unwrap_or(false)
+                if auto
+                    || Confirm::new("Do you want to enable FUSE")
+                        .with_default(false)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        .unwrap_or(false)
                 {
                     let d_path = self.mnt.clone().unwrap_or(format!(
                         "{}/neptis-mnt",
@@ -1931,11 +1955,40 @@ impl UiApp {
                             .to_str()
                             .expect("Expected directory to parse!")
                     ));
-                    if let Some(mnt_path) = Text::new("Please type a mount name")
+                    if auto && !d_path.is_empty() {
+                        unmount_if_stale(&d_path);
+                        match (|| {
+                            let raw_path = PathBuf::from(&d_path);
+                            if !raw_path.exists() {
+                                fs::create_dir_all(raw_path)
+                                    .map_err(|_| "Failed to create FUSE directory.".to_string())?;
+                            } else if !raw_path.is_dir() {
+                                return Err("FUSE directory is a file!".to_string());
+                            }
+
+                            let fs = NeptisFS::new(self.api.clone(), self.rt.clone());
+                            Ok(
+                                fuse_mt::spawn_mount(fuse_mt::FuseMT::new(fs, 1), &d_path, &[])
+                                    .map_err(|e| e.to_string())?,
+                            )
+                        })() {
+                            Ok(x) => {
+                                let mut fuse_guard = self.fuse.lock().unwrap();
+                                *fuse_guard = Some(x);
+                            }
+                            Err(e) => {
+                                println!("> Failed to auto-mount: {e}");
+                                thread::sleep(Duration::from_secs(2));
+                            }
+                        }
+                        break;
+                    } else if let Some(mnt_path) = Text::new("Please type an existing mount path")
                         .with_default(d_path.as_str())
                         .prompt_skippable()
                         .expect("Prompt failed to load!")
                     {
+                        let _ = fs::create_dir_all(&mnt_path);
+                        unmount_if_stale(&mnt_path);
                         let fs = NeptisFS::new(self.api.clone(), self.rt.clone());
                         match fuse_mt::spawn_mount(fuse_mt::FuseMT::new(fs, 1), mnt_path, &[]) {
                             Ok(x) => {
@@ -1991,6 +2044,7 @@ impl UiApp {
         const STR_BACK: &str = "Go Back";
         let mut last_refresh = Instant::now();
         let mut first_time: bool = true;
+        let mut is_admin: bool = false;
         loop {
             if first_time || last_refresh.elapsed().as_secs() >= 1000 {
                 first_time = false;
@@ -1998,9 +2052,10 @@ impl UiApp {
                 let m_api = &*self.api.read().unwrap();
                 if let Some(api) = m_api {
                     // Check to see if the SMB is enabled or not.
-
+                    let (s, admin) = self.get_luser_stats(api, false);
+                    is_admin = admin;
                     println!("Connection: {}\n", api.to_string());
-                    println!("{}", self.get_luser_stats(api, false));
+                    println!("{}", s);
                     println!(
                         "\n============== Top {} Jobs:\n{}\n\n",
                         MAX_JOBS,
@@ -2042,24 +2097,37 @@ impl UiApp {
         // Show menu with "Go Back"
         match inquire::Select::new(
             "Please select an action",
-            vec![
-                STR_BACK,
-                STR_BROWSER,
-                STR_FUSE,
-                STR_BREAKDOWN,
-                STR_POINTS,
-                STR_USERS,
-                STR_SYSTEM,
-                STR_PASSWORD,
-                STR_SMB,
-                STR_LOGOUT,
-            ],
+            if is_admin {
+                vec![
+                    STR_BACK,
+                    STR_BROWSER,
+                    STR_FUSE,
+                    STR_BREAKDOWN,
+                    STR_POINTS,
+                    STR_USERS,
+                    STR_SYSTEM,
+                    STR_PASSWORD,
+                    STR_SMB,
+                    STR_LOGOUT,
+                ]
+            } else {
+                vec![
+                    STR_BACK,
+                    STR_BROWSER,
+                    STR_FUSE,
+                    STR_BREAKDOWN,
+                    STR_POINTS,
+                    STR_PASSWORD,
+                    STR_SMB,
+                    STR_LOGOUT,
+                ]
+            },
         )
         .prompt_skippable()
         .expect("Failed to show prompt!")
         {
             Some(STR_BROWSER) => self.start_browser(),
-            Some(STR_FUSE) => self.start_fuse(),
+            Some(STR_FUSE) => self.start_fuse(false),
             Some(STR_BREAKDOWN) => self.show_point_breakdown(),
             Some(STR_POINTS) => self.show_points(),
             Some(STR_USERS) => self.show_users(),
@@ -2094,7 +2162,7 @@ impl UiApp {
         }
     }
 
-    fn show_connect(&self, server: ServerItem) {
+    fn show_connect(&self, server: ServerItem, auto: bool) {
         {
             let mut api = self.api.write().unwrap();
             *api = None;
@@ -2126,6 +2194,8 @@ impl UiApp {
             }
         );
 
+        if !server.is_default {}
+
         fn prompt_password() -> String {
             Password::new("Password")
                 .with_validator(required!())
@@ -2134,25 +2204,39 @@ impl UiApp {
                 .expect("Failed to show password prompt!")
                 .unwrap_or("".into())
         }
-        let p_user = match Text::new("Username")
-            .with_validator(required!())
-            .with_initial_value(server.user_name.clone().unwrap_or(String::new()).as_str())
-            .prompt_skippable()
-            .expect("Failed to show username prompt!")
-        {
-            Some(x) => x,
-            None => {
-                self.begin();
-                return; // go back
-            }
-        };
 
-        let p_password = match server.user_name.as_ref() {
-            Some(name) if name == &p_user => {
-                server.user_password.clone().unwrap_or_else(prompt_password)
-            }
-            _ => prompt_password(),
-        };
+        let (p_user, p_password) =
+            if auto && server.user_name.is_some() && server.user_password.is_some() {
+                let u = server.user_name.clone().unwrap();
+                let p = server.user_password.clone().unwrap();
+                println!("Using saved credentials for default server.");
+                (u, p)
+            } else {
+                // Prompt for username
+                let p_user = match Text::new("Username")
+                    .with_validator(required!())
+                    .with_initial_value(server.user_name.clone().unwrap_or_default().as_str())
+                    .prompt_skippable()
+                    .expect("Failed to show username prompt!")
+                {
+                    Some(x) => x,
+                    None => {
+                        self.begin();
+                        return; // go back
+                    }
+                };
+
+                // Prompt for password only if username matches saved one
+                let p_password = match server.user_name.as_ref() {
+                    Some(name) if name == &p_user => {
+                        server.user_password.clone().unwrap_or_else(prompt_password)
+                    }
+                    _ => prompt_password(),
+                };
+
+                (p_user, p_password)
+            };
+
         if p_password.is_empty() {
             self.begin();
             return;
@@ -2183,49 +2267,124 @@ impl UiApp {
 
         let mut ret: Result<WebApi, String> = raw_connect_func();
         // At this point - attempt to see if the Arduino can wake up the PC.
+        use crossterm::{
+            event::{self, Event, KeyCode},
+            execute,
+            terminal::{disable_raw_mode, enable_raw_mode},
+        };
+        use std::io::stdout;
+        use std::thread;
+        use std::time::{Duration, Instant};
         if ret.is_err() {
-            if let Some(a_endpoint) = server.arduino_endpoint {
-                if let Some(a_pass) = server.arduino_password {
-                    println!("Initial connection failed. Attempting to wake up PC...");
+            let mut good = true;
+            if let Err(ref e) = ret {
+                if e.to_lowercase().contains("auth") {
+                    good = false;
+                }
+            }
+            if good {
+                if let Some(a_endpoint) = server.arduino_endpoint {
+                    if let Some(a_pass) = server.arduino_password {
+                        println!("Initial connection failed. Attempting to wake up PC...");
 
-                    let ep = a_endpoint.as_str();
-                    let a_func = || {
-                        let key = ArduinoSecret::from_string(a_pass.as_str())
-                            .ok_or("Failed to parse Arduino Key".to_string())?
-                            .rolling_key()
-                            .ok_or("Failed to calculate next Arduino key".to_string())?;
-                        ClientBuilder::new()
-                            .build()
-                            .map(|x| {
-                                self.rt.block_on(async move {
-                                    x.post(format!("{}/{}", ep, "start"))
-                                        .bearer_auth(key.to_string())
-                                        .send()
-                                        .await
-                                        .ok()
+                        let ep = a_endpoint.as_str();
+                        let a_func = || {
+                            let key = ArduinoSecret::from_string(a_pass.as_str())
+                                .ok_or("Failed to parse Arduino Key".to_string())?
+                                .rolling_key()
+                                .ok_or("Failed to calculate next Arduino key".to_string())?;
+                            ClientBuilder::new()
+                                .build()
+                                .map(|x| {
+                                    self.rt.block_on(async move {
+                                        x.post(format!("{}/{}", ep, "start"))
+                                            .bearer_auth(key.to_string())
+                                            .send()
+                                            .await
+                                            .ok()
+                                    })
                                 })
-                            })
-                            .ok()
-                            .flatten()
-                            .ok_or("Failed to send packet to Arduino!".to_string())?
-                            .error_for_status()
-                            .map_err(|e| format!("Arduino returned error upon submission: {}", e))
-                            .map(|_| ())
-                    };
+                                .ok()
+                                .flatten()
+                                .ok_or("Failed to send packet to Arduino!".to_string())?
+                                .error_for_status()
+                                .map_err(|e| {
+                                    format!("Arduino returned error upon submission: {}", e)
+                                })
+                                .map(|_| ())
+                        };
 
-                    for _ in 0..3 {
-                        match a_func() {
-                            Ok(_) => {
-                                println!("Successfully sent signal. Waiting 15 seconds to boot...");
-                                thread::sleep(Duration::from_secs(15));
-                                break;
+                        let mut sig_good = false;
+                        for _ in 0..3 {
+                            match a_func() {
+                                Ok(_) => {
+                                    println!(
+                                        "Successfully sent signal. Waiting for server to respond..."
+                                    );
+                                    sig_good = true;
+                                    break;
+                                }
+                                Err(e) => println!("Failed to send signal: {e}. Trying again..."),
                             }
-                            Err(e) => println!("Failed to send signal: {e}. Trying again..."),
+                            thread::sleep(Duration::from_secs(2));
                         }
-                        thread::sleep(Duration::from_secs(2));
+
+                        if sig_good {
+                            println!(
+                                "Retrying connection for up to 2 minutes... Press any key to cancel."
+                            );
+                            enable_raw_mode().ok();
+                            let start_time = Instant::now();
+                            let mut user_cancelled = false;
+
+                            loop {
+                                if let Ok(true) = event::poll(Duration::from_secs(0)) {
+                                    if let Ok(Event::Key(_)) = event::read() {
+                                        user_cancelled = true;
+                                        break;
+                                    }
+                                }
+
+                                disable_raw_mode().ok();
+                                println!("Retrying...");
+                                enable_raw_mode().ok();
+                                ret = raw_connect_func();
+                                if ret.is_ok() {
+                                    break;
+                                }
+
+                                if start_time.elapsed() > Duration::from_secs(120) {
+                                    break;
+                                }
+
+                                // Wait 10 seconds with cancellation check
+                                for _ in 0..10 {
+                                    if let Ok(true) = event::poll(Duration::from_secs(1)) {
+                                        if let Ok(Event::Key(_)) = event::read() {
+                                            user_cancelled = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if user_cancelled {
+                                    break;
+                                }
+                            }
+
+                            disable_raw_mode().ok();
+
+                            if user_cancelled {
+                                println!("Cancelled by user.");
+                            } else if ret.is_ok() {
+                                println!("Reconnected successfully.");
+                            } else {
+                                println!("Timed out after 2 minutes of retries.");
+                            }
+                        } else {
+                            ret = raw_connect_func(); // One last attempt
+                        }
                     }
-                    // No matter what - try one more time in-case something works now.
-                    ret = raw_connect_func();
                 }
             }
         }
@@ -2236,34 +2395,64 @@ impl UiApp {
                     *api = Some(x)
                 }
                 println!("Connection successful!");
+                if server.auto_fuse {
+                    self.start_fuse(true);
+                }
                 self.show_dashboard();
-                self.start_fuse();
             }
             Err(e) => {
                 println!("Failed to connect to server. Error: {}", e.to_string());
                 thread::sleep(Duration::from_secs(3));
-                self.begin();
+                if auto {
+                    // Prevent an infinite loop by terminating.
+                    process::exit(1);
+                } else {
+                    self.begin();
+                }
             }
         }
     }
 
     pub fn begin(&self) {
+        use crossterm::{
+            event::{self, Event},
+            terminal::{disable_raw_mode, enable_raw_mode},
+        };
+        use std::time::Duration;
+
         clearscreen::clear().unwrap();
         fn format_slash(s: &str) -> String {
             s.strip_suffix("/").unwrap_or(s).to_string()
         }
 
-        let rtc = self.rt.clone();
-        let path = self.db.clone()
-            .or(
-                dirs_next::home_dir()
-                    .map(|x|x.join("neptis.db").to_str().unwrap().to_string()))
-                    .expect("Failed to find database location! Please set 'DATABASE_PATH' to a path, or use a user account with a home directory.");
+        // Check if a default server is set.
+        if let Some(d_item) = self
+            .db
+            .get_all_servers_sync()
+            .map(|x| x.into_iter().find(|x| x.is_default))
+            .expect("Failed to pull from database")
+        {
+            let mut do_auto = true;
+            println!(
+                "Connecting to {} ({}) in 2 seconds...",
+                d_item.server_name.as_str(),
+                d_item.server_endpoint.as_str()
+            );
+            enable_raw_mode().expect("Failed to enable raw mode");
+            if event::poll(Duration::from_secs(2)).expect("Polling failed") {
+                if let Event::Key(_) = event::read().expect("Failed to read event") {
+                    do_auto = false;
+                }
+            }
+            disable_raw_mode().expect("Failed to disable raw mode");
+            if do_auto {
+                self.show_connect(d_item, true);
+            }
+        }
 
-        let db = DbController::new(&rtc, &path);
         self.show_connect(
             ModelManager::new(
-                Some(&db),
+                Some(&self.db),
                 vec![
                     ModelProperty::new(
                         "Server Name",
@@ -2449,7 +2638,23 @@ impl UiApp {
                                 None => PromptResult::Cancel
                             }
                         },
-                        |x| x.auto_fuse.to_string())
+                        |x| x.auto_fuse.to_string()),
+                    ModelProperty::new(
+                        "Be Default",
+                        false,
+                        |serv: &mut ServerItem| {
+                            match Confirm::new("Do you want the server to be default (will replace others)")
+                                .with_default(serv.is_default)
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
+                                Some(x) => {
+                                    serv.is_default = x;
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
+                        },
+                        |x| x.is_default.to_string())
                 ],
                 Box::new(|ctx| Ok(ctx.api.expect("Expected DB to be valid!").get_all_servers_sync()?)),
             )
@@ -2459,6 +2664,13 @@ impl UiApp {
             ))
             .with_modify(Box::new(|ctx, servers, serv| {
                 let mut m_servers = servers.clone();
+                if serv.is_default {
+                    for server in m_servers.iter_mut() {
+                        // Overwrite default status for other servers.
+                        server.is_default = false;
+                    }
+                }
+
                 if let Some(u_serv) = m_servers
                     .iter_mut()
                     .find(|x| x.server_name == serv.server_name.as_str())
@@ -2475,13 +2687,24 @@ impl UiApp {
             .do_display()
             .expect("Failed to show information!")
             .expect("Expected server to be selected!"),
+            false
         );
     }
 
+    fn get_db(db_path: Option<String>) -> String {
+        db_path.clone()
+            .or(
+                dirs_next::home_dir()
+                    .map(|x|x.join("neptis.db").to_str().unwrap().to_string()))
+                    .expect("Failed to find database location! Please set 'NEPTIS_DB' to a path, or use a user account with a home directory.")
+    }
+
     #[cfg(unix)]
-    pub fn new(db: Option<String>, mnt: Option<String>) -> UiApp {
+    pub fn new(db_path: Option<String>, mnt: Option<String>) -> UiApp {
+        let rt = Arc::new(Runtime::new().expect("Expected Runtime to start!"));
+        let db = DbController::new(rt.clone(), &Self::get_db(db_path));
         UiApp {
-            rt: Arc::new(Runtime::new().expect("Failed to start runtime!")),
+            rt: rt.clone(),
             api: Arc::new(RwLock::new(None)),
             fuse: Mutex::new(None),
             db,
@@ -2491,8 +2714,10 @@ impl UiApp {
 
     #[cfg(not(unix))]
     pub fn new(db: Option<String>) -> UiApp {
+        let rt = Arc::new(Runtime::new().expect("Expected Runtime to start!"));
+        let db = DbController::new(rt.clone(), &Self::get_db(db_path));
         UiApp {
-            rt: Arc::new(Runtime::new().expect("Failed to start runtime!")),
+            rt: rt.clone(),
             api: Arc::new(RwLock::new(None)),
             db,
         }
@@ -2550,7 +2775,7 @@ pub fn main() {
             }
         }
 
-        thread::sleep(Duration::from_millis(1500));
+        thread::sleep(Duration::from_millis(500));
     }
 
     #[cfg(unix)]
