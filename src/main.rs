@@ -9,28 +9,33 @@ extern crate serde_repr;
 extern crate url;
 
 pub mod apis;
-pub mod error;
-pub mod models;
-pub mod rolling_secret;
 pub mod arduino_secret;
-pub mod ui;
+pub mod db;
 pub mod filesystem;
 pub mod macros;
+pub mod models;
+pub mod rolling_secret;
+pub mod ui;
 
 use crate::ui::file_size::FileSize;
 
 use apis::dtos::{AutoJobType, JobStatus, JobType, PutForAutoJobWebApi, RepoJobDto};
 use arduino_secret::ArduinoSecret;
+use axoupdater::{
+    AxoUpdater, AxoupdateError, ReleaseSource, ReleaseSourceType, UpdateRequest, Version,
+};
 use chrono::{Local, Utc};
 use cron::Schedule;
+use db::controller::DbController;
+use db::server::ServerItem;
 use filesystem::NeptisFS;
 use inquire::Editor;
 use reqwest::ClientBuilder;
-use ui::browser::FileBrowser;
-use uuid::Uuid;
 use std::ffi::OsStr;
 use std::process;
 use std::str::FromStr;
+use ui::browser::FileBrowser;
+use uuid::Uuid;
 
 use std::sync::RwLock;
 use std::thread::JoinHandle;
@@ -52,11 +57,9 @@ use models::SnapshotDto;
 use rolling_secret::RollingSecret;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
-use ui::{
-    manager::{
-        ApiContext, ModelExtraOption, ModelManager, ModelProperty, PropGetType, ToShortIdString,
-    },
-    server::ServerItem,
+use ui::manager::{
+    ApiContext, ModelExtraOption, ModelManager, ModelProperty, PromptResult, PropGetType,
+    ToShortIdString,
 };
 use url::Url;
 
@@ -80,12 +83,15 @@ struct UiApp {
     rt: Arc<Runtime>,
     api: Arc<RwLock<Option<WebApi>>>,
     fuse: Mutex<Option<fuser::BackgroundSession>>,
+    db: Option<String>,
+    mnt: Option<String>,
 }
 
 #[cfg(not(unix))]
 struct UiApp {
     rt: Arc<Runtime>,
     api: Arc<RwLock<Option<WebApi>>>,
+    db: Option<String>,
 }
 
 static DEFAULT_PASS: &'static str = "default123";
@@ -124,7 +130,10 @@ impl UiApp {
                 len
             );
             println!("ID:               {}", snapshot.id);
-            println!("Locked:           {}", if snapshot.locked { "YES" } else { "NO" });
+            println!(
+                "Locked:           {}",
+                if snapshot.locked { "YES" } else { "NO" }
+            );
             println!("Label:            {}", snapshot.label);
             println!("Tree:             {}", snapshot.tree);
             println!("Program Version:  {}", snapshot.program_version);
@@ -226,7 +235,7 @@ impl UiApp {
                         if index + 1 < snapshots.len() {
                             index += 1;
                         }
-                    },
+                    }
                     KeyCode::Char('l') => {
                         // Attempt to lock or unlock the given snapshot.
                         println!("*** Please wait...");
@@ -235,21 +244,23 @@ impl UiApp {
                         let id = snapshot.id.clone();
                         if {
                             if let Some(api) = m_api {
-                            self.rt.block_on(async move {
-                                if !is_locked {
-                                    api.lock_one_snapshot(mount, id.as_str()).await
-                                } else {
-                                    api.unlock_one_snapshot(mount, id.as_str()).await
-                                } 
-                            })
+                                self.rt.block_on(async move {
+                                    if !is_locked {
+                                        api.lock_one_snapshot(mount, id.as_str()).await
+                                    } else {
+                                        api.unlock_one_snapshot(mount, id.as_str()).await
+                                    }
+                                })
                             } else {
                                 Err(NeptisError::Str("API is invalid!".into()))
                             }
-                        }.is_ok() {
+                        }
+                        .is_ok()
+                        {
                             snapshot.locked = !is_locked;
                             continue;
                         }
-                    },
+                    }
                     KeyCode::Char('q') | KeyCode::Enter => {
                         break;
                     }
@@ -283,7 +294,8 @@ impl UiApp {
                     let m_api = &*self.api.read().unwrap();
                     if let Some(api) = m_api {
                         self.rt.block_on(async move {
-                            api.get_all_jobs_for_mount(mount).await?
+                            api.get_all_jobs_for_mount(mount)
+                                .await?
                                 .into_iter()
                                 .find(|x| x.id == j_id)
                                 .ok_or(NeptisError::Str("Failed to find the job!".into()))
@@ -292,18 +304,24 @@ impl UiApp {
                         Err(NeptisError::Str("API is not valid!".into()))
                     }
                 };
-    
+
                 match result {
                     Ok(dto) => {
                         println!("================= Repo Job Info =================");
                         println!("ID:                {}", dto.id);
                         println!("Title:             {}", dto.title.as_deref().unwrap_or("-"));
-                        println!("Snapshot ID:       {}", dto.snapshot_id.as_deref().unwrap_or("-"));
+                        println!(
+                            "Snapshot ID:       {}",
+                            dto.snapshot_id.as_deref().unwrap_or("-")
+                        );
                         println!("Point Owned By:    {}", dto.point_owned_by);
                         println!("Point Name:        {}", dto.point_name);
                         println!("Job Type:          {}", dto.job_type.to_string());
                         println!("Job Status:        {}", dto.job_status.to_string());
-                        println!("Used Bytes:        {}", FileSize::prettify(dto.used_bytes as u64));
+                        println!(
+                            "Used Bytes:        {}",
+                            FileSize::prettify(dto.used_bytes as u64)
+                        );
                         println!(
                             "Total Bytes:       {}",
                             dto.total_bytes
@@ -311,11 +329,18 @@ impl UiApp {
                                 .unwrap_or("-".into())
                         );
                         if !dto.errors.is_empty() {
-                            println!("Errors ({}):        {}", dto.errors.len(), dto.errors.join(", "));
+                            println!(
+                                "Errors ({}):        {}",
+                                dto.errors.len(),
+                                dto.errors.join(", ")
+                            );
                         } else {
                             println!("Errors:            -");
                         }
-                        println!("Create Date:       {}", dto.create_date.format("%Y-%m-%d %H:%M:%S"));
+                        println!(
+                            "Create Date:       {}",
+                            dto.create_date.format("%Y-%m-%d %H:%M:%S")
+                        );
                         println!(
                             "End Date:          {}",
                             dto.end_date
@@ -332,7 +357,7 @@ impl UiApp {
                 }
                 last_refresh = Instant::now();
             }
-    
+
             // Wait up to 100ms for a key event (non-blocking, so loop keeps going)
             if event::poll(Duration::from_millis(100)).unwrap() {
                 match event::read().unwrap() {
@@ -340,13 +365,14 @@ impl UiApp {
                         if key_event.code == KeyCode::Enter {
                             break;
                         }
-    
+
                         // Go to interactive menu
                         let dto = {
                             let m_api = &*self.api.read().unwrap();
                             if let Some(api) = m_api {
                                 self.rt.block_on(async move {
-                                    api.get_all_jobs_for_mount(mount).await?
+                                    api.get_all_jobs_for_mount(mount)
+                                        .await?
                                         .into_iter()
                                         .find(|x| x.id == j_id)
                                         .ok_or(NeptisError::Str("Failed to find the job!".into()))
@@ -355,14 +381,17 @@ impl UiApp {
                                 Err(NeptisError::Str("API is not valid!".into()))
                             }
                         };
-    
+
                         match dto {
                             Ok(dto) => {
                                 if dto.snapshot_id.is_some() {
-                                    if Select::new("Please select an action", vec!["Go Back", "View Snapshot"])
-                                        .prompt()
-                                        .expect("Failed to show prompt!")
-                                        == "View Snapshot"
+                                    if Select::new(
+                                        "Please select an action",
+                                        vec!["Go Back", "View Snapshot"],
+                                    )
+                                    .prompt_skippable()
+                                    .expect("Failed to show prompt!")
+                                        == Some("View Snapshot")
                                     {
                                         match {
                                             let m_api = &*self.api.read().unwrap();
@@ -372,7 +401,9 @@ impl UiApp {
                                                         dto.point_name.as_str(),
                                                         dto.snapshot_id
                                                             .clone()
-                                                            .expect("Expected snapshot to be valid!")
+                                                            .expect(
+                                                                "Expected snapshot to be valid!",
+                                                            )
                                                             .as_str(),
                                                     )
                                                     .await
@@ -390,7 +421,8 @@ impl UiApp {
                                 } else {
                                     if Confirm::new("Do you want to go back")
                                         .with_default(true)
-                                        .prompt()
+                                        .prompt_skippable()
+                                        .map(|x| x.unwrap_or(true))
                                         .expect("Failed to show prompt!")
                                     {
                                         break;
@@ -404,10 +436,9 @@ impl UiApp {
                 }
             }
         }
-    
+
         self.on_view_jobs(mount, None);
     }
-    
 
     // inspected
     fn on_view_jobs(&self, mount: &str, highlight: Option<&str>) {
@@ -452,11 +483,10 @@ impl UiApp {
                                 Ok(jobs)
                             };
 
-                                ctx.rt.block_on(async move {
-                                    let ret = api.get_all_jobs_for_mount(&mount_inner).await?;
-                                    sort_jobs(ret)
-                                })
-
+                            ctx.rt.block_on(async move {
+                                let ret = api.get_all_jobs_for_mount(&mount_inner).await?;
+                                sort_jobs(ret)
+                            })
                         }
                     }),
                 )
@@ -470,10 +500,7 @@ impl UiApp {
         match ret {
             Ok(x) => match x {
                 Some(dto) => self.on_select_job(mount, dto.id),
-                None => {
-                        self.on_select_mount(mount)
-
-                }
+                None => self.on_select_mount(mount),
             },
             Err(e) => {
                 println!(
@@ -481,7 +508,7 @@ impl UiApp {
                     e.to_string()
                 );
                 thread::sleep(Duration::from_secs(2));
-                    self.on_select_mount(mount);
+                self.on_select_mount(mount);
             }
         }
     }
@@ -523,9 +550,10 @@ impl UiApp {
                 clearscreen::clear().expect("Failed to clear screen!");
                 println!("\n============== Jobs:\n{}\n\n", output);
                 if Confirm::new("Do you want to go back?")
-                .with_default(true)
-                    .prompt()
+                    .with_default(true)
+                    .prompt_skippable()
                     .expect("Failed to show prompt!")
+                    .unwrap_or(true)
                 {
                     break;
                 }
@@ -546,56 +574,76 @@ impl UiApp {
                         ModelProperty::new(
                             "Task Name",
                             true,
-                            |dto: &mut AutoJobDto| {
-                                dto.task_name = Text::new("Please enter Task Name")
-                                    .with_validator(required!())
-                                    .with_initial_value(dto.task_name.as_str())
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |dto: &mut AutoJobDto| match Text::new("Please enter Task Name")
+                                .with_validator(required!())
+                                .with_initial_value(dto.task_name.as_str())
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.task_name = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.task_name.clone(),
                         ),
                         ModelProperty::new(
                             "Cron Schedule",
                             false,
-                            |dto: &mut AutoJobDto| {
-                                dto.cron_schedule = Text::new("Please enter Cron Schedule")
-                                    .with_validator(required!())
-                                    .with_validator(|s: &str| match Schedule::from_str(s) {
-                                        Ok(_) => Ok(Validation::Valid),
-                                        Err(_) => Ok(Validation::Invalid(
-                                            "Cron schedule is not valid!".into(),
-                                        )),
-                                    })
-                                    .with_initial_value(dto.cron_schedule.as_str())
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |dto: &mut AutoJobDto| match Text::new("Please enter Cron Schedule")
+                                .with_validator(required!())
+                                .with_validator(|s: &str| match Schedule::from_str(s) {
+                                    Ok(_) => Ok(Validation::Valid),
+                                    Err(_) => Ok(Validation::Invalid(
+                                        "Cron schedule is not valid!".into(),
+                                    )),
+                                })
+                                .with_initial_value(dto.cron_schedule.as_str())
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.cron_schedule = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.cron_schedule.clone(),
                         ),
                         ModelProperty::new(
                             "Enabled",
                             false,
-                            |dto: &mut AutoJobDto| {
-                                dto.enabled = Confirm::new("Do you want it Enabled")
-                                    .with_default(dto.enabled)
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |dto: &mut AutoJobDto| match Confirm::new("Do you want it Enabled")
+                                .with_default(dto.enabled)
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.enabled = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.enabled.to_string(),
                         ),
                         ModelProperty::new(
                             "Job Type",
                             false,
-                            |dto: &mut AutoJobDto| {
-                                dto.job_type = CustomType::<AutoJobType>::new(
-                                    "Please enter Job Type (Backup/Check)",
-                                )
-                                .with_starting_input(
-                                    dto.job_type.to_string().replace("Unknown", "").as_str(),
-                                )
-                                .prompt()
-                                .expect("Failed to show prompt!")
+                            |dto: &mut AutoJobDto| match CustomType::<AutoJobType>::new(
+                                "Please enter Job Type (Backup/Check)",
+                            )
+                            .with_starting_input(
+                                dto.job_type.to_string().replace("Unknown", "").as_str(),
+                            )
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.job_type = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.job_type.to_string(),
                         ),
@@ -673,7 +721,10 @@ impl UiApp {
         }
     }
 
-    fn get_snapshot_mm<'a>(api: &'a WebApi, mount: &str) -> ModelManager<'a, SnapshotFileDto> {
+    fn get_snapshot_mm<'a>(
+        api: &'a WebApi,
+        mount: &str,
+    ) -> ModelManager<'a, SnapshotFileDto, WebApi> {
         let mount_owned = mount.to_string(); // make it owned
         ModelManager::new(
             Some(api),
@@ -691,12 +742,11 @@ impl UiApp {
                         .as_deref()
                         .ok_or(NeptisError::Str("API is not valid!".into()))?;
                     let mount_inner = mount_owned.clone(); // clone again for async block
-                    ctx.rt
-                        .block_on(async move { 
-                            let mut ret = api.get_all_snapshots(&mount_inner).await?;
-                            ret.sort_by_key(|x|std::cmp::Reverse(x.time));
-                            Ok(ret)
-                        })
+                    ctx.rt.block_on(async move {
+                        let mut ret = api.get_all_snapshots(&mount_inner).await?;
+                        ret.sort_by_key(|x| std::cmp::Reverse(x.time));
+                        Ok(ret)
+                    })
                 }
             }),
         )
@@ -795,50 +845,59 @@ impl UiApp {
             }
 
             let opt = match mode {
-                JobType::Backup => Confirm::new("Do you want to lock the snapshot").prompt().expect("Failed to show prompt!"),
-                JobType::Restore => Confirm::new("Do you want to overwrite data").prompt().expect("Failed to show prompt!"),
-                _ => false
+                JobType::Backup => Confirm::new("Do you want to lock the snapshot")
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!"),
+                JobType::Restore => Confirm::new("Do you want to overwrite data")
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!"),
+                _ => Some(false),
             };
 
-            if Confirm::new("Do you want to proceed")
-                .prompt()
-                .expect("Failed to show prompt!")
-            {
-                // Initialize the job and attempt to show it off.
-                println!("Creating job...");
-                let ret = {
-                    let m_api = &*self.api.read().unwrap();
-                    if let Some(api) = m_api {
-                        self.rt.block_on(async {
-                            match mode {
-                                JobType::Backup => api.post_one_backup(mount, opt).await,
-                                JobType::Check => api.post_one_check(mount).await,
-                                JobType::Restore => {
-                                    api.post_one_restore(mount, s_ret.unwrap().id.as_str(), opt)
-                                        .await
+            if let Some(opt) = opt {
+                if Confirm::new("Do you want to proceed")
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    .unwrap_or(false)
+                {
+                    // Initialize the job and attempt to show it off.
+                    println!("Creating job...");
+                    let ret = {
+                        let m_api = &*self.api.read().unwrap();
+                        if let Some(api) = m_api {
+                            self.rt.block_on(async {
+                                match mode {
+                                    JobType::Backup => api.post_one_backup(mount, opt).await,
+                                    JobType::Check => api.post_one_check(mount).await,
+                                    JobType::Restore => {
+                                        api.post_one_restore(mount, s_ret.unwrap().id.as_str(), opt)
+                                            .await
+                                    }
+                                    _ => Err(NeptisError::Str("Invalid option selected".into())),
                                 }
-                                _ => Err(NeptisError::Str("Invalid option selected".into())),
-                            }
-                        })
-                    } else {
-                        Err(NeptisError::Str("API is not valid!".into()))
-                    }
-                };
-                match ret {
-                    Ok(x) => {
-                        println!("**** Job created successfully! ID: {}", x.id);
-                        thread::sleep(Duration::from_secs(2));
-                        self.on_select_job(mount, x.id.clone());
-                    }
-                    Err(e) => {
-                        println!(
-                            "**** An unexpected error has occurred while changing the password. ****\n{}",
-                            e.to_string()
-                        );
-                        thread::sleep(Duration::from_secs(2));
-                        self.on_select_mount(mount);
+                            })
+                        } else {
+                            Err(NeptisError::Str("API is not valid!".into()))
+                        }
+                    };
+                    match ret {
+                        Ok(x) => {
+                            println!("**** Job created successfully! ID: {}", x.id);
+                            thread::sleep(Duration::from_secs(2));
+                            self.on_select_job(mount, x.id.clone());
+                        }
+                        Err(e) => {
+                            println!(
+                                "**** An unexpected error has occurred while changing the password. ****\n{}",
+                                e.to_string()
+                            );
+                            thread::sleep(Duration::from_secs(2));
+                            self.on_select_mount(mount);
+                        }
                     }
                 }
+            } else {
+                self.on_select_mount(mount);
             }
         } else {
             println!("**** An unexpected error has occurred. Going back in 2 seconds...");
@@ -865,7 +924,10 @@ impl UiApp {
                         .flatten()
                 });
                 smb = self.rt.block_on(async {
-                    api.get_one_user(&api.get_username()).await.ok().map(|x|x.is_smb)
+                    api.get_one_user(&api.get_username())
+                        .await
+                        .ok()
+                        .map(|x| x.is_smb)
                 })
             }
             (stats, smb.unwrap_or(false))
@@ -896,11 +958,39 @@ impl UiApp {
                     )
                 }
                 if smb {
-                    println!("**** SMB Enabled at: \\\\IP\\{}-{}-<data or repo>\n", stats.owned_by.as_str(), stats.name.as_str());
+                    println!(
+                        "**** SMB Enabled at: \\\\IP\\{}-{}-<data or repo>\n",
+                        stats.owned_by.as_str(),
+                        stats.name.as_str()
+                    );
                 }
-                println!("Created At: {}", stats.date_created.and_utc().with_timezone(&Local).format("%Y-%m-%d %I:%M:%S %p").to_string());
-                println!("Data Accessed At: {}", stats.data_accessed.and_utc().with_timezone(&Local).format("%Y-%m-%d %I:%M:%S %p").to_string());
-                println!("Repo Accessed At: {}", stats.repo_accessed.and_utc().with_timezone(&Local).format("%Y-%m-%d %I:%M:%S %p").to_string());
+                println!(
+                    "Created At: {}",
+                    stats
+                        .date_created
+                        .and_utc()
+                        .with_timezone(&Local)
+                        .format("%Y-%m-%d %I:%M:%S %p")
+                        .to_string()
+                );
+                println!(
+                    "Data Accessed At: {}",
+                    stats
+                        .data_accessed
+                        .and_utc()
+                        .with_timezone(&Local)
+                        .format("%Y-%m-%d %I:%M:%S %p")
+                        .to_string()
+                );
+                println!(
+                    "Repo Accessed At: {}",
+                    stats
+                        .repo_accessed
+                        .and_utc()
+                        .with_timezone(&Local)
+                        .format("%Y-%m-%d %I:%M:%S %p")
+                        .to_string()
+                );
                 println!();
                 println!("Data Usage: {}", prettify_bytes(d_total, d_used, d_free));
                 println!("Repo Usage: {}", prettify_bytes(r_total, r_used, r_free));
@@ -929,8 +1019,9 @@ impl UiApp {
                 STR_START_RESTORE,
             ],
         )
-        .prompt()
+        .prompt_skippable()
         .expect("Failed to show prompt!")
+        .unwrap_or(STR_GO_BACK)
         {
             STR_MANAGE_SNAPSHOT => self.on_manage_snapshot(mount),
             STR_MANAGE_JOB => self.on_view_jobs(mount, None),
@@ -949,49 +1040,52 @@ impl UiApp {
             || Confirm::new(
                 "The only available option is to change the password. Do you want to do this?",
             )
-            .prompt()
+            .prompt_skippable()
             .expect("Failed to show prompt!")
+            .unwrap_or(false)
         {
             let a_str = format!("Please enter password for {}", user.user_name.as_str());
-            let p = Password::new(a_str.as_str())
+            if let Some(p) = Password::new(a_str.as_str())
                 .with_validator(required!())
-                .prompt()
-                .expect("Failed to show prompt!");
-            match (|| {
-                let m_api = &*self.api.read().unwrap();
-                if let Some(api) = m_api {
-                    self.rt
-                        .block_on(async move {
-                            api.put_one_user(
-                                user.user_name.as_str(),
-                                UserForUpdateApi {
-                                    first_name: None,
-                                    last_name: None,
-                                    is_admin: None,
-                                    max_data_bytes: None,
-                                    max_snapshot_bytes: None,
-                                    password: Some(p),
-                                },
-                            )
-                            .await
-                        })
-                        .map(|_| ())
-                } else {
-                    Err(NeptisError::Str("API is invalid!".into()))
-                }
-            })() {
-                Ok(_) => {
-                    println!("**** Password changed successfully.");
-                    thread::sleep(Duration::from_secs(2));
-                    self.show_users();
-                }
-                Err(e) => {
-                    println!(
-                        "**** An unexpected error has occurred while changing the password. ****\n{}",
-                        e.to_string()
-                    );
-                    thread::sleep(Duration::from_secs(2));
-                    self.show_users();
+                .prompt_skippable()
+                .expect("Failed to show prompt!")
+            {
+                match (|| {
+                    let m_api = &*self.api.read().unwrap();
+                    if let Some(api) = m_api {
+                        self.rt
+                            .block_on(async move {
+                                api.put_one_user(
+                                    user.user_name.as_str(),
+                                    UserForUpdateApi {
+                                        first_name: None,
+                                        last_name: None,
+                                        is_admin: None,
+                                        max_data_bytes: None,
+                                        max_snapshot_bytes: None,
+                                        password: Some(p),
+                                    },
+                                )
+                                .await
+                            })
+                            .map(|_| ())
+                    } else {
+                        Err(NeptisError::Str("API is invalid!".into()))
+                    }
+                })() {
+                    Ok(_) => {
+                        println!("**** Password changed successfully.");
+                        thread::sleep(Duration::from_secs(2));
+                        self.show_users();
+                    }
+                    Err(e) => {
+                        println!(
+                            "**** An unexpected error has occurred while changing the password. ****\n{}",
+                            e.to_string()
+                        );
+                        thread::sleep(Duration::from_secs(2));
+                        self.show_users();
+                    }
                 }
             }
         }
@@ -1024,31 +1118,23 @@ impl UiApp {
                                     y.repo_max_bytes as u64
                                 ))
                                 .collect();
-    
                             // Sort by total (used bytes) descending
                             data_points.sort_by(|a, b| b.1.cmp(&a.1));
                             repo_points.sort_by(|a, b| b.1.cmp(&a.1));
-    
                             let data_total = mounts.iter().map(|y| y.data_max_bytes).sum::<i64>() as u64;
                             let repo_total = mounts.iter().map(|y| y.repo_max_bytes).sum::<i64>() as u64;
-                            let data_used = mounts.iter().map(|y| y.data_used_bytes.unwrap_or(0)).sum::<i64>() as u64;
-                            let repo_used = mounts.iter().map(|y| y.repo_used_bytes.unwrap_or(0)).sum::<i64>() as u64;
-    
-                            // Format breakdown
                             let data_breakdown = data_points.iter()
                                 .map(|(name, used, max)| {
                                     format!("  • {}: {} / {}", name, FileSize::prettify(*used), FileSize::prettify(*max))
                                 })
                                 .collect::<Vec<_>>()
                                 .join("\n");
-                                
                             let repo_breakdown = repo_points.iter()
                                 .map(|(name, used, max)| {
                                     format!("  • {}: {} / {}", name, FileSize::prettify(*used), FileSize::prettify(*max))
                                 })
                                 .collect::<Vec<_>>()
                                 .join("\n");
-    
                             format!(
                                 "Data Point Allocation: {} / {}\n{}\n\nRepo Point Allocation: {} / {}\n{}",
                                 FileSize::prettify(data_total),
@@ -1108,22 +1194,27 @@ impl UiApp {
                         ModelProperty::new(
                             "Name",
                             true,
-                            |dto: &mut InternalMountDto| {
-                                dto.name = Text::new("Please enter Mount Name")
-                                    .with_initial_value(dto.name.as_str())
-                                    .with_validator(required!())
-                                    .with_validator(|m_name: &str|{
-                                        if !regex::Regex::new(r"^[a-z_][a-z0-9_-]*$")
-                                            .expect("Expected regex to work")
-                                            .is_match(m_name) 
-                                        {
-                                            Ok(Validation::Invalid("Bad name!".into()))
-                                        } else {
-                                            Ok(Validation::Valid)
-                                        }
-                                    })
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |dto: &mut InternalMountDto| match Text::new("Please enter Mount Name")
+                                .with_initial_value(dto.name.as_str())
+                                .with_validator(required!())
+                                .with_validator(|m_name: &str| {
+                                    if !regex::Regex::new(r"^[a-z_][a-z0-9_-]*$")
+                                        .expect("Expected regex to work")
+                                        .is_match(m_name)
+                                    {
+                                        Ok(Validation::Invalid("Bad name!".into()))
+                                    } else {
+                                        Ok(Validation::Valid)
+                                    }
+                                })
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.name = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.name.clone(),
                         ),
@@ -1132,21 +1223,27 @@ impl UiApp {
                             false,
                             |dto: &mut InternalMountDto| {
                                 let si = FileSize::from_bytes(dto.data_bytes as u64).to_string();
-                                dto.data_bytes =
-                                    CustomType::<FileSize>::new("Please enter maximum data size")
-                                        .with_starting_input(si.as_str())
-                                        .with_validator(|input: &FileSize| {
-                                            if input.get_bytes() < 10000 {
-                                                Ok(Validation::Invalid(
-                                                    "You must enter at least 10K bytes!".into(),
-                                                ))
-                                            } else {
-                                                Ok(Validation::Valid)
-                                            }
-                                        })
-                                        .prompt()
-                                        .expect("Failed to show prompt!")
-                                        .get_bytes() as i64
+                                match CustomType::<FileSize>::new("Please enter maximum data size")
+                                    .with_starting_input(si.as_str())
+                                    .with_validator(|input: &FileSize| {
+                                        if input.get_bytes() < 10000 {
+                                            Ok(Validation::Invalid(
+                                                "You must enter at least 10K bytes!".into(),
+                                            ))
+                                        } else {
+                                            Ok(Validation::Valid)
+                                        }
+                                    })
+                                    .prompt_skippable()
+                                    .expect("Failed to show prompt!")
+                                    .map(|x| x.get_bytes() as i64)
+                                {
+                                    Some(x) => {
+                                        dto.data_bytes = x;
+                                        PromptResult::Ok
+                                    }
+                                    None => PromptResult::Cancel,
+                                }
                             },
                             |x| FileSize::from_bytes(x.data_bytes as u64).to_string(),
                         ),
@@ -1155,21 +1252,27 @@ impl UiApp {
                             false,
                             |dto: &mut InternalMountDto| {
                                 let si = FileSize::from_bytes(dto.repo_bytes as u64).to_string();
-                                dto.repo_bytes =
-                                    CustomType::<FileSize>::new("Please enter maximum repo size")
-                                        .with_starting_input(si.as_str())
-                                        .with_validator(|input: &FileSize| {
-                                            if input.get_bytes() < 10000 {
-                                                Ok(Validation::Invalid(
-                                                    "You must enter at least 10K bytes!".into(),
-                                                ))
-                                            } else {
-                                                Ok(Validation::Valid)
-                                            }
-                                        })
-                                        .prompt()
-                                        .expect("Failed to show prompt!")
-                                        .get_bytes() as i64
+                                match CustomType::<FileSize>::new("Please enter maximum repo size")
+                                    .with_starting_input(si.as_str())
+                                    .with_validator(|input: &FileSize| {
+                                        if input.get_bytes() < 10000 {
+                                            Ok(Validation::Invalid(
+                                                "You must enter at least 10K bytes!".into(),
+                                            ))
+                                        } else {
+                                            Ok(Validation::Valid)
+                                        }
+                                    })
+                                    .prompt_skippable()
+                                    .expect("Failed to show prompt!")
+                                    .map(|x| x.get_bytes() as i64)
+                                {
+                                    Some(x) => {
+                                        dto.repo_bytes = x;
+                                        PromptResult::Ok
+                                    }
+                                    None => PromptResult::Cancel,
+                                }
                             },
                             |x| FileSize::from_bytes(x.repo_bytes as u64).to_string(),
                         ),
@@ -1256,57 +1359,77 @@ impl UiApp {
                         ModelProperty::new(
                             "Username",
                             true,
-                            |user: &mut UserDto| {
-                                user.user_name = Text::new("Please enter Username")
-                                    .with_initial_value(user.user_name.as_str())
-                                    .with_validator(required!())
-                                    .with_validator(|m_name: &str|{
-                                        if !regex::Regex::new(r"^[a-z_][a-z0-9_-]*$")
-                                            .expect("Expected regex to work")
-                                            .is_match(m_name) 
-                                        {
-                                            Ok(Validation::Invalid("Bad name!".into()))
-                                        } else {
-                                            Ok(Validation::Valid)
-                                        }
-                                    })
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |user: &mut UserDto| match Text::new("Please enter Username")
+                                .with_initial_value(user.user_name.as_str())
+                                .with_validator(required!())
+                                .with_validator(|m_name: &str| {
+                                    if !regex::Regex::new(r"^[a-z_][a-z0-9_-]*$")
+                                        .expect("Expected regex to work")
+                                        .is_match(m_name)
+                                    {
+                                        Ok(Validation::Invalid("Bad name!".into()))
+                                    } else {
+                                        Ok(Validation::Valid)
+                                    }
+                                })
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    user.user_name = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.user_name.clone(),
                         ),
                         ModelProperty::new(
                             "First Name",
                             false,
-                            |user: &mut UserDto| {
-                                user.first_name = Text::new("Please enter First Name")
-                                    .with_initial_value(user.first_name.as_str())
-                                    .with_validator(required!())
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |user: &mut UserDto| match Text::new("Please enter First Name")
+                                .with_initial_value(user.first_name.as_str())
+                                .with_validator(required!())
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    user.first_name = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.first_name.clone(),
                         ),
                         ModelProperty::new(
                             "Last Name",
                             false,
-                            |user: &mut UserDto| {
-                                user.last_name = Text::new("Please enter Last Name")
-                                    .with_initial_value(user.last_name.as_str())
-                                    .with_validator(required!())
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |user: &mut UserDto| match Text::new("Please enter Last Name")
+                                .with_initial_value(user.last_name.as_str())
+                                .with_validator(required!())
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    user.last_name = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.last_name.clone(),
                         ),
                         ModelProperty::new(
                             "Is Admin",
                             false,
-                            |user: &mut UserDto| {
-                                user.is_admin = Confirm::new("Should the user be admin")
-                                    .with_default(user.is_admin)
-                                    .prompt()
-                                    .expect("Failed to show prompt!")
+                            |user: &mut UserDto| match Confirm::new("Should the user be admin")
+                                .with_default(user.is_admin)
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    user.is_admin = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
                             },
                             |x| x.is_admin.to_string(),
                         ),
@@ -1316,22 +1439,27 @@ impl UiApp {
                             |user: &mut UserDto| {
                                 let si =
                                     FileSize::from(user.max_data_bytes.unwrap_or(0)).to_string();
-                                user.max_data_bytes = Some(
-                                    CustomType::<FileSize>::new("Please enter maximum data size")
-                                        .with_starting_input(si.as_str())
-                                        .with_validator(|input: &FileSize| {
-                                            if input.get_bytes() < 10000 {
-                                                Ok(Validation::Invalid(
-                                                    "You must enter at least 10K bytes!".into(),
-                                                ))
-                                            } else {
-                                                Ok(Validation::Valid)
-                                            }
-                                        })
-                                        .prompt()
-                                        .expect("Failed to show prompt!")
-                                        .get_bytes() as i64,
-                                )
+                                match CustomType::<FileSize>::new("Please enter maximum data size")
+                                    .with_starting_input(si.as_str())
+                                    .with_validator(|input: &FileSize| {
+                                        if input.get_bytes() < 10000 {
+                                            Ok(Validation::Invalid(
+                                                "You must enter at least 10K bytes!".into(),
+                                            ))
+                                        } else {
+                                            Ok(Validation::Valid)
+                                        }
+                                    })
+                                    .prompt_skippable()
+                                    .expect("Failed to show prompt!")
+                                    .map(|x| x.get_bytes() as i64)
+                                {
+                                    Some(x) => {
+                                        user.max_data_bytes = Some(x);
+                                        PromptResult::Ok
+                                    }
+                                    None => PromptResult::Cancel,
+                                }
                             },
                             |x| {
                                 x.max_data_bytes
@@ -1345,22 +1473,27 @@ impl UiApp {
                             |user: &mut UserDto| {
                                 let si = FileSize::from(user.max_snapshot_bytes.unwrap_or(0))
                                     .to_string();
-                                user.max_snapshot_bytes = Some(
-                                    CustomType::<FileSize>::new("Please enter maximum repo size")
-                                        .with_starting_input(si.as_str())
-                                        .with_validator(|input: &FileSize| {
-                                            if input.get_bytes() < 10000 {
-                                                Ok(Validation::Invalid(
-                                                    "You must enter at least 10K bytes!".into(),
-                                                ))
-                                            } else {
-                                                Ok(Validation::Valid)
-                                            }
-                                        })
-                                        .prompt()
-                                        .expect("Failed to show prompt!")
-                                        .get_bytes() as i64,
-                                )
+                                match CustomType::<FileSize>::new("Please enter maximum repo size")
+                                    .with_starting_input(si.as_str())
+                                    .with_validator(|input: &FileSize| {
+                                        if input.get_bytes() < 10000 {
+                                            Ok(Validation::Invalid(
+                                                "You must enter at least 10K bytes!".into(),
+                                            ))
+                                        } else {
+                                            Ok(Validation::Valid)
+                                        }
+                                    })
+                                    .prompt_skippable()
+                                    .expect("Failed to show prompt!")
+                                    .map(|x| x.get_bytes() as i64)
+                                {
+                                    Some(x) => {
+                                        user.max_snapshot_bytes = Some(x);
+                                        PromptResult::Ok
+                                    }
+                                    None => PromptResult::Cancel,
+                                }
                             },
                             |x| {
                                 x.max_snapshot_bytes
@@ -1444,9 +1577,8 @@ impl UiApp {
                 thread::sleep(Duration::from_secs(5));
                 self.begin();
             }
-        }   
+        }
     }
-
 
     //inspected
     fn show_system(&self) {
@@ -1479,7 +1611,7 @@ impl UiApp {
                             Ok(())
                         } else {
                             Err(NeptisError::Str("Failed to pull info!".into()))
-                        }   
+                        }
                     } else {
                         Err(NeptisError::Str("API is not valid!".into()))
                     }
@@ -1490,8 +1622,9 @@ impl UiApp {
                 running_jobs = {
                     let m_api = &*self.api.read().unwrap();
                     if let Some(api) = m_api {
-                        self.rt
-                            .block_on(async { api.get_all_jobs(MAX_JOBS, Some(0)).await.unwrap_or(vec![]) })
+                        self.rt.block_on(async {
+                            api.get_all_jobs(MAX_JOBS, Some(0)).await.unwrap_or(vec![])
+                        })
                     } else {
                         self.show_dashboard();
                         return;
@@ -1509,14 +1642,14 @@ impl UiApp {
                 }
                 println!("\n\nPress <ENTER> to show options...");
                 last_refresh = Instant::now();
-            }  
-    
+            }
+
             // Poll for a keypress non-blocking
             if event::poll(Duration::from_millis(100)).unwrap() {
                 if let Event::Key(_) = event::read().unwrap() {
                     break;
                 }
-            }           
+            }
         }
 
         fn handle_result<F>(result: Result<(), NeptisError>, callback: F)
@@ -1540,8 +1673,9 @@ impl UiApp {
             "Please select an option",
             vec![STR_REFRESH, STR_BACK, STR_SHUTDOWN, STR_RESTART],
         )
-        .prompt()
-        .expect("Failed to show prompt!");
+        .prompt_skippable()
+        .expect("Failed to show prompt!")
+        .unwrap_or(STR_BACK);
 
         fn handle_unsafe(jobs: &[RepoJobDto]) -> bool {
             let j_count = jobs.iter().count();
@@ -1558,8 +1692,9 @@ impl UiApp {
             }
             println!("\n");
             Confirm::new("Please confirm your decision")
-                .prompt()
+                .prompt_skippable()
                 .expect("Failed to show prompt!")
+                .unwrap_or(false)
         }
 
         match choice {
@@ -1599,25 +1734,26 @@ impl UiApp {
             _ => self.show_dashboard(),
         }
     }
-       
 
     // inspected
     fn show_change_password(&self) {
         {
             let m_api = &*self.api.read().unwrap();
             if let Some(api) = m_api {
-                let p = Password::new("Please enter your new password")
+                if let Some(p) = Password::new("Please enter your new password")
                     .with_validator(required!())
-                    .prompt()
-                    .expect("Failed to show prompt!");
-                match self
-                    .rt
-                    .block_on(async move { api.put_password(p.as_str()).await })
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
                 {
-                    Ok(_) => println!("**** Successfully changed password!"),
-                    Err(_) => println!("**** Failed to change password!"),
+                    match self
+                        .rt
+                        .block_on(async move { api.put_password(p.as_str()).await })
+                    {
+                        Ok(_) => println!("**** Successfully changed password!"),
+                        Err(_) => println!("**** Failed to change password!"),
+                    }
+                    thread::sleep(Duration::from_secs(2));
                 }
-                thread::sleep(Duration::from_secs(2));
             }
         }
         self.show_dashboard();
@@ -1636,7 +1772,12 @@ impl UiApp {
                 }
             }
             println!("\n\n\n");
-            if Confirm::new("Do you want to go back").with_default(true).prompt().expect("Failed to show prompt!") {
+            if Confirm::new("Do you want to go back")
+                .with_default(true)
+                .prompt_skippable()
+                .expect("Failed to show prompt!")
+                .unwrap_or(true)
+            {
                 break;
             }
         }
@@ -1648,9 +1789,10 @@ impl UiApp {
         match {
             let m_api = &*self.api.read().unwrap();
             if let Some(api) = m_api {
-                if let Ok(user) = self.rt.block_on(async move {
-                    api.get_one_user(api.get_username().as_str()).await
-                }) {
+                if let Ok(user) = self
+                    .rt
+                    .block_on(async move { api.get_one_user(api.get_username().as_str()).await })
+                {
                     Ok(user.is_smb)
                 } else {
                     Err(NeptisError::Str("Failed to pull user info!".into()))
@@ -1661,46 +1803,75 @@ impl UiApp {
         } {
             Ok(x) => {
                 if x {
-                    if Confirm::new("SMB is currently enabled for your account. Do you want to disable it?").prompt().expect("Failed to show prompt!") {
+                    if Confirm::new(
+                        "SMB is currently enabled for your account. Do you want to disable it?",
+                    )
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    .unwrap_or(false)
+                    {
                         match {
                             let m_api = &*self.api.read().unwrap();
                             if let Some(api) = m_api {
-                                self.rt.block_on(async {
-                                    api.disable_smb().await
-                                })
+                                self.rt.block_on(async { api.disable_smb().await })
                             } else {
                                 Err(NeptisError::Str("API is not valid!".into()))
                             }
                         } {
-                            Ok(_) => println!("**** Successful. It may take several minutes to apply."),
+                            Ok(_) => {
+                                println!("**** Successful. It may take several minutes to apply.")
+                            }
                             Err(e) => {
-                                println!("**** An unexpected error has occurred. Refreshing in 5 secs: {}", e.to_string());
+                                println!(
+                                    "**** An unexpected error has occurred. Refreshing in 5 secs: {}",
+                                    e.to_string()
+                                );
                             }
                         }
                     }
                 } else {
-                    if Confirm::new("SMB is currently disabled for your account. Do you want to enable it?").prompt().expect("Failed to show prompt!") {
-                        let smb_pass = Password::new("Please enter any password to use").with_validator(required!()).prompt().expect("Failed to show prompt!");
-                        match {
-                            let m_api = &*self.api.read().unwrap();
-                            if let Some(api) = m_api {
-                                self.rt.block_on(async {
-                                    api.enable_smb(smb_pass.as_str()).await
-                                }).map(|_|api.get_username().clone())
-                            } else {
-                                Err(NeptisError::Str("API is not valid!".into()))
-                            }
-                        } {
-                            Ok(user) => println!("**** Successful. It may take several minutes to apply.\nVisit '\\\\IP\\{}-<POINT NAME>-<DATA/REPO>' (all lowercase) on local SMB.", user),
-                            Err(e) => {
-                                println!("**** An unexpected error has occurred. Refreshing in 5 secs: {}", e.to_string());
+                    if Confirm::new(
+                        "SMB is currently disabled for your account. Do you want to enable it?",
+                    )
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    .unwrap_or(false)
+                    {
+                        if let Some(smb_pass) = Password::new("Please enter any password to use")
+                            .with_validator(required!())
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!")
+                        {
+                            match {
+                                let m_api = &*self.api.read().unwrap();
+                                if let Some(api) = m_api {
+                                    self.rt
+                                        .block_on(async { api.enable_smb(smb_pass.as_str()).await })
+                                        .map(|_| api.get_username().clone())
+                                } else {
+                                    Err(NeptisError::Str("API is not valid!".into()))
+                                }
+                            } {
+                                Ok(user) => println!(
+                                    "**** Successful. It may take several minutes to apply.\nVisit '\\\\IP\\{}-<POINT NAME>-<DATA/REPO>' (all lowercase) on local SMB.",
+                                    user
+                                ),
+                                Err(e) => {
+                                    println!(
+                                        "**** An unexpected error has occurred. Refreshing in 5 secs: {}",
+                                        e.to_string()
+                                    );
+                                }
                             }
                         }
                     }
                 }
-            },
+            }
             Err(e) => {
-                println!("**** An unexpected error has occurred. Refreshing in 5 secs: {}", e.to_string());
+                println!(
+                    "**** An unexpected error has occurred. Refreshing in 5 secs: {}",
+                    e.to_string()
+                );
             }
         }
         thread::sleep(Duration::from_secs(2));
@@ -1710,7 +1881,9 @@ impl UiApp {
     #[cfg(not(unix))]
     fn start_fuse(&self) {
         clearscreen::clear().expect("Expected to clear screen!");
-        println!("*** FUSE is not available on your platform. Please use SMB or the built-in browser instead.");
+        println!(
+            "*** FUSE is not available on your platform. Please use SMB or the built-in browser instead."
+        );
         thread::sleep(Duration::from_secs(3));
         self.show_dashboard();
     }
@@ -1721,16 +1894,22 @@ impl UiApp {
             clearscreen::clear().expect("Expected to clear screen!");
             let mnt = {
                 let fuse_guard = self.fuse.lock().unwrap();
-                fuse_guard.as_ref().map(|f| f.mountpoint.to_str().expect("Expected mountpath to unwrap!").to_owned())
+                fuse_guard.as_ref().map(|f| {
+                    f.mountpoint
+                        .to_str()
+                        .expect("Expected mountpath to unwrap!")
+                        .to_owned()
+                })
             };
-        
+
             if let Some(mnt) = mnt {
                 println!("\n*** FUSE is connected to {}", mnt);
-        
+
                 if Confirm::new("Do you want to disable FUSE")
                     .with_default(false)
-                    .prompt()
+                    .prompt_skippable()
                     .expect("Failed to show prompt!")
+                    .unwrap_or(false)
                 {
                     let mut fuse_guard = self.fuse.lock().unwrap();
                     *fuse_guard = None;
@@ -1741,33 +1920,40 @@ impl UiApp {
                 println!("*** FUSE is not enabled.");
                 if Confirm::new("Do you want to enable FUSE")
                     .with_default(false)
-                    .prompt()
+                    .prompt_skippable()
                     .expect("Failed to show prompt!")
+                    .unwrap_or(false)
                 {
-                    let d_path = format!("{}/neptis-mnt", dirs_next::home_dir()
-                        .expect("Expected home directory!")
-                        .to_str()
-                        .expect("Expected directory to parse!"));
-                    let mnt_path = Text::new("Please type a mount name")
+                    let d_path = self.mnt.clone().unwrap_or(format!(
+                        "{}/neptis-mnt",
+                        dirs_next::home_dir()
+                            .expect("Expected home directory!")
+                            .to_str()
+                            .expect("Expected directory to parse!")
+                    ));
+                    if let Some(mnt_path) = Text::new("Please type a mount name")
                         .with_default(d_path.as_str())
-                        .prompt()
-                        .expect("Prompt failed to load!");
-    
-                    let fs = NeptisFS::new(self.api.clone(), self.rt.clone());
-                    match fuse_mt::spawn_mount(fuse_mt::FuseMT::new(fs, 1), mnt_path, &[]) {
-                        Ok(x) => {
-                            let mut fuse_guard = self.fuse.lock().unwrap();
-                            *fuse_guard = Some(x);
-                            println!("> Mount successful!");
-                            thread::sleep(Duration::from_secs(2));
-                            break;
-                        },
-                        Err(e) => {
-                            println!("> Failed to mount: {e}");
-                            thread::sleep(Duration::from_secs(2));
-                            continue;
+                        .prompt_skippable()
+                        .expect("Prompt failed to load!")
+                    {
+                        let fs = NeptisFS::new(self.api.clone(), self.rt.clone());
+                        match fuse_mt::spawn_mount(fuse_mt::FuseMT::new(fs, 1), mnt_path, &[]) {
+                            Ok(x) => {
+                                let mut fuse_guard = self.fuse.lock().unwrap();
+                                *fuse_guard = Some(x);
+                                println!("> Mount successful!");
+                                thread::sleep(Duration::from_secs(2));
+                                break;
+                            }
+                            Err(e) => {
+                                println!("> Failed to mount: {e}");
+                                thread::sleep(Duration::from_secs(2));
+                                continue;
+                            }
                         }
-                    }       
+                    } else {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -1775,7 +1961,7 @@ impl UiApp {
         }
         self.show_dashboard();
     }
-    
+
     fn start_browser(&self) {
         FileBrowser::new(NeptisFS::new(self.api.clone(), self.rt.clone())).show_browser();
         self.show_dashboard();
@@ -1785,14 +1971,14 @@ impl UiApp {
     fn show_dashboard(&self) {
         use crossterm::{
             event::{self, Event},
-            terminal::{disable_raw_mode},
+            terminal::disable_raw_mode,
         };
         use std::{
             io::Write,
             process, thread,
             time::{Duration, Instant},
         };
-    
+
         const STR_BROWSER: &str = "File Browser";
         const STR_FUSE: &str = "Start FUSE";
         const STR_BREAKDOWN: &str = "Show Usage Breakdown";
@@ -1812,7 +1998,7 @@ impl UiApp {
                 let m_api = &*self.api.read().unwrap();
                 if let Some(api) = m_api {
                     // Check to see if the SMB is enabled or not.
-                    
+
                     println!("Connection: {}\n", api.to_string());
                     println!("{}", self.get_luser_stats(api, false));
                     println!(
@@ -1869,26 +2055,41 @@ impl UiApp {
                 STR_LOGOUT,
             ],
         )
-        .prompt()
+        .prompt_skippable()
         .expect("Failed to show prompt!")
         {
-            STR_BROWSER => self.start_browser(),
-            STR_FUSE => self.start_fuse(),
-            STR_BREAKDOWN => self.show_point_breakdown(),
-            STR_POINTS => self.show_points(),
-            STR_USERS => self.show_users(),
-            STR_SYSTEM => self.show_system(),
-            STR_PASSWORD => self.show_change_password(),
-            STR_SMB => self.show_smb(),
-            STR_BACK => {
+            Some(STR_BROWSER) => self.start_browser(),
+            Some(STR_FUSE) => self.start_fuse(),
+            Some(STR_BREAKDOWN) => self.show_point_breakdown(),
+            Some(STR_POINTS) => self.show_points(),
+            Some(STR_USERS) => self.show_users(),
+            Some(STR_SYSTEM) => self.show_system(),
+            Some(STR_PASSWORD) => self.show_change_password(),
+            Some(STR_SMB) => self.show_smb(),
+            Some(STR_BACK) => {
                 // Call show_dashboard again to resume auto-refresh
                 clearscreen::clear().expect("Failed to clear screen!");
                 self.show_dashboard();
-            },
-            STR_LOGOUT | _ => {
+            }
+            Some(STR_LOGOUT) => {
                 clearscreen::clear().expect("Failed to clear screen!");
                 println!("Logout\n");
                 process::exit(0);
+            }
+            _ => {
+                // The user may have mistakenly hit ESC again. Ask if they want
+                // to logout or simply do nothing.
+                clearscreen::clear().expect("Failed to clear screen!");
+                if Confirm::new("Do you want to logout?")
+                    .with_default(false)
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    .unwrap_or(false)
+                {
+                    clearscreen::clear().expect("Failed to clear screen!");
+                    println!("Logout\n");
+                    process::exit(0);
+                }
             }
         }
     }
@@ -1909,23 +2110,53 @@ impl UiApp {
                 "NO"
             }
         );
-        println!("Arduino Enabled: {}\n", 
+
+        #[cfg(unix)]
+        println!(
+            "FUSE On Login: {}",
+            if server.auto_fuse { "YES" } else { "NO" }
+        );
+
+        println!(
+            "Arduino Enabled: {}\n",
             if server.arduino_endpoint.is_some() {
                 "YES"
-            } else { 
-                "NO" 
+            } else {
+                "NO"
             }
         );
-        let p_user = Text::new("Username")
+
+        fn prompt_password() -> String {
+            Password::new("Password")
+                .with_validator(required!())
+                .without_confirmation()
+                .prompt_skippable()
+                .expect("Failed to show password prompt!")
+                .unwrap_or("".into())
+        }
+        let p_user = match Text::new("Username")
             .with_validator(required!())
             .with_initial_value(server.user_name.clone().unwrap_or(String::new()).as_str())
-            .prompt()
-            .expect("Failed to show username prompt!");
-        let p_password = Password::new("Password")
-            .with_validator(required!())
-            .without_confirmation()
-            .prompt()
-            .expect("Failed to show password prompt!");
+            .prompt_skippable()
+            .expect("Failed to show username prompt!")
+        {
+            Some(x) => x,
+            None => {
+                self.begin();
+                return; // go back
+            }
+        };
+
+        let p_password = match server.user_name.as_ref() {
+            Some(name) if name == &p_user => {
+                server.user_password.clone().unwrap_or_else(prompt_password)
+            }
+            _ => prompt_password(),
+        };
+        if p_password.is_empty() {
+            self.begin();
+            return;
+        }
 
         // Attempt to connect to the server.
         let pass = server.server_password.as_ref();
@@ -1937,8 +2168,12 @@ impl UiApp {
                         .ok_or("Failed to parse secret!".to_string())?,
                 );
             }
-            let mut t_api =
-                WebApi::new(server.server_endpoint.as_str(), p_user.clone(), p_password.clone(), secret.clone());
+            let mut t_api = WebApi::new(
+                server.server_endpoint.as_str(),
+                p_user.clone(),
+                p_password.clone(),
+                secret.clone(),
+            );
             self.rt
                 .block_on(async { t_api.get_info().await })
                 .ok()
@@ -1956,13 +2191,9 @@ impl UiApp {
                     let ep = a_endpoint.as_str();
                     let a_func = || {
                         let key = ArduinoSecret::from_string(a_pass.as_str())
-                            .ok_or(
-                                "Failed to parse Arduino Key".to_string(),
-                            )?
+                            .ok_or("Failed to parse Arduino Key".to_string())?
                             .rolling_key()
-                            .ok_or(
-                                "Failed to calculate next Arduino key".to_string(),
-                            )?;
+                            .ok_or("Failed to calculate next Arduino key".to_string())?;
                         ClientBuilder::new()
                             .build()
                             .map(|x| {
@@ -1976,23 +2207,20 @@ impl UiApp {
                             })
                             .ok()
                             .flatten()
-                            .ok_or(
-                                "Failed to send packet to Arduino!".to_string(),
-                            )?
+                            .ok_or("Failed to send packet to Arduino!".to_string())?
                             .error_for_status()
-                            .map_err(|e|
-                                format!("Arduino returned error upon submission: {}", e),
-                            ).map(|_|())
+                            .map_err(|e| format!("Arduino returned error upon submission: {}", e))
+                            .map(|_| ())
                     };
 
                     for _ in 0..3 {
                         match a_func() {
-                            Ok(_) => { 
-                                println!("Successfully sent signal. Waiting 15 seconds to boot..."); 
-                                thread::sleep(Duration::from_secs(15)); 
-                                break; 
-                            },
-                            Err(e) => println!("Failed to send signal: {e}. Trying again...")
+                            Ok(_) => {
+                                println!("Successfully sent signal. Waiting 15 seconds to boot...");
+                                thread::sleep(Duration::from_secs(15));
+                                break;
+                            }
+                            Err(e) => println!("Failed to send signal: {e}. Trying again..."),
                         }
                         thread::sleep(Duration::from_secs(2));
                     }
@@ -2009,6 +2237,7 @@ impl UiApp {
                 }
                 println!("Connection successful!");
                 self.show_dashboard();
+                self.start_fuse();
             }
             Err(e) => {
                 println!("Failed to connect to server. Error: {}", e.to_string());
@@ -2024,19 +2253,33 @@ impl UiApp {
             s.strip_suffix("/").unwrap_or(s).to_string()
         }
 
+        let rtc = self.rt.clone();
+        let path = self.db.clone()
+            .or(
+                dirs_next::home_dir()
+                    .map(|x|x.join("neptis.db").to_str().unwrap().to_string()))
+                    .expect("Failed to find database location! Please set 'DATABASE_PATH' to a path, or use a user account with a home directory.");
+
+        let db = DbController::new(&rtc, &path);
         self.show_connect(
             ModelManager::new(
-                None,
+                Some(&db),
                 vec![
                     ModelProperty::new(
                         "Server Name",
                         true,
                         |serv: &mut ServerItem| {
-                            serv.server_name = Text::new("Please enter Server Name")
-                                .with_initial_value(serv.server_name.as_str())
-                                .with_validator(required!())
-                                .prompt()
-                                .expect("Failed to show prompt!")
+                            match Text::new("Please enter Server Name")
+                            .with_initial_value(serv.server_name.as_str())
+                            .with_validator(required!())
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!") {
+                                Some(x) => {
+                                    serv.server_name = x;
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
                         },
                         |x| x.server_name.clone(),
                     ),
@@ -2044,24 +2287,30 @@ impl UiApp {
                         "Server Endpoint",
                         false,
                         |serv: &mut ServerItem| {
-                            serv.server_endpoint = Text::new("Enter Server URL")
-                                .with_initial_value(serv.server_endpoint.as_str())
-                                .with_validator(|input: &str| {
-                                    if input.trim().is_empty() {
-                                        return Ok(Validation::Invalid(
-                                            "This field is required.".into(),
-                                        ));
-                                    }
-                                    match Url::parse(input) {
-                                        Ok(_) => Ok(Validation::Valid),
-                                        Err(_) => Ok(Validation::Invalid(
-                                            "Please enter a valid URL.".into(),
-                                        )),
-                                    }
-                                })
-                                .with_formatter(&format_slash)
-                                .prompt()
-                                .expect("Failed to show prompt!");
+                            match Text::new("Enter Server URL")
+                            .with_initial_value(serv.server_endpoint.as_str())
+                            .with_validator(|input: &str| {
+                                if input.trim().is_empty() {
+                                    return Ok(Validation::Invalid(
+                                        "This field is required.".into(),
+                                    ));
+                                }
+                                match Url::parse(input) {
+                                    Ok(_) => Ok(Validation::Valid),
+                                    Err(_) => Ok(Validation::Invalid(
+                                        "Please enter a valid URL.".into(),
+                                    )),
+                                }
+                            })
+                            .with_formatter(&format_slash)
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!") {
+                                Some(x) => {
+                                    serv.server_endpoint = x;
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
                         },
                         |x| x.server_endpoint.clone(),
                     ),
@@ -2069,15 +2318,20 @@ impl UiApp {
                         "Server Password",
                         false,
                         |serv: &mut ServerItem| {
-                            serv.server_password = match Editor::new("Re-type Server Password")
-                                .prompt()
-                                .expect("Failed to show prompt!")
-                                .as_str()
-                                .trim()
-                            {
-                                "" => None,
-                                x => Some(x.to_string()),
-                            };
+                            match Editor::new("Re-type Server Password")
+                                .with_predefined_text(&serv.server_password.clone().unwrap_or("".into()))
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
+                                    Some(x) => {
+                                        serv.server_password = if x.is_empty() {
+                                            None
+                                        } else {
+                                            Some(x.trim().to_string())
+                                        };
+                                        PromptResult::Ok
+                                    },
+                                    None => PromptResult::Cancel
+                                }
                         },
                         |x| {
                             x.server_password
@@ -2090,37 +2344,67 @@ impl UiApp {
                         "Default User",
                         false,
                         |serv: &mut ServerItem| {
-                            serv.user_name = match Text::new("Enter Default User")
-                                .with_initial_value(
-                                    serv.user_name.clone().unwrap_or("".into()).as_str(),
-                                )
-                                .prompt()
-                                .expect("Failed to show prompt!")
-                                .as_str()
-                                .trim()
-                            {
-                                "" => None,
-                                x => Some(x.to_string()),
-                            };
+                            match Text::new("Enter Default User")
+                                .with_initial_value(&serv.user_name.clone().unwrap_or("".into()))
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
+                                    Some(x) => {
+                                        serv.user_name = if x.is_empty() {
+                                            None
+                                        } else {
+                                            Some(x.trim().to_string())
+                                        };
+                                        PromptResult::Ok
+                                    },
+                                    None => PromptResult::Cancel
+                                }
                         },
                         |x| x.user_name.clone().unwrap_or("[EMPTY]".to_string()),
+                    ),
+                    ModelProperty::new(
+                        "Default User Password",
+                        false,
+                        |serv: &mut ServerItem| {
+                            match Text::new("Re-type Default User Password")
+                                .with_initial_value(&serv.user_password.clone().unwrap_or("".into()))
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
+                                    Some(x) => {
+                                        serv.user_password = if x.is_empty() {
+                                            None
+                                        } else {
+                                            Some(x.trim().to_string())
+                                        };
+                                        PromptResult::Ok
+                                    },
+                                    None => PromptResult::Cancel
+                                }
+                        },
+                        |x| {
+                            x.user_password
+                                .clone()
+                                .map(|_| "[FILLED]".to_string())
+                                .unwrap_or("[EMPTY]".to_string())
+                        },
                     ),
                     ModelProperty::new(
                         "Arduino Endpoint",
                         false,
                         |serv: &mut ServerItem| {
-                            serv.arduino_endpoint = match Text::new("Enter Arduino Endpoint")
-                                .with_initial_value(
-                                    serv.arduino_endpoint.clone().unwrap_or("".into()).as_str(),
-                                )
-                                .prompt()
-                                .expect("Failed to show prompt!")
-                                .as_str()
-                                .trim()
-                            {
-                                "" => None,
-                                x => Some(x.to_string()),
-                            };
+                            match Text::new("Enter Arduino Endpoint")
+                                .with_initial_value(&serv.arduino_endpoint.clone().unwrap_or("".into()))
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
+                                Some(x) => {
+                                    serv.arduino_endpoint = if x.is_empty() {
+                                        None
+                                    } else {
+                                        Some(x.trim().to_string())
+                                    };
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
                         },
                         |x| x.arduino_endpoint.clone().unwrap_or("[EMPTY]".to_string()),
                     ),
@@ -2128,15 +2412,20 @@ impl UiApp {
                         "Arduino Password",
                         false,
                         |serv: &mut ServerItem| {
-                            serv.arduino_password = match Editor::new("Re-type Arduino Password")
-                                .prompt()
-                                .expect("Failed to show prompt!")
-                                .as_str()
-                                .trim()
-                            {
-                                "" => None,
-                                x => Some(x.to_string()),
-                            };
+                            match Text::new("Re-type Arduino Password")
+                                .with_initial_value(&serv.arduino_password.clone().unwrap_or("".into()))
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
+                                    Some(x) => {
+                                        serv.arduino_password = if x.is_empty() {
+                                            None
+                                        } else {
+                                            Some(x.trim().to_string())
+                                        };
+                                        PromptResult::Ok
+                                    },
+                                    None => PromptResult::Cancel
+                                }
                         },
                         |x| {
                             x.arduino_password
@@ -2145,14 +2434,30 @@ impl UiApp {
                                 .unwrap_or("[EMPTY]".to_string())
                         },
                     ),
+                    ModelProperty::new_for_linux_only(
+                        "Auto Fuse",
+                        false,
+                        |serv: &mut ServerItem| {
+                            match Confirm::new("Do you want FUSE to auto-mount")
+                                .with_default(serv.auto_fuse)
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
+                                Some(x) => {
+                                    serv.auto_fuse = x;
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
+                        },
+                        |x| x.auto_fuse.to_string())
                 ],
-                Box::new(|_| ServerItem::load_servers()),
+                Box::new(|ctx| Ok(ctx.api.expect("Expected DB to be valid!").get_all_servers_sync()?)),
             )
             .with_select_title(format!(
                 "Neptis Front End v{}\nCopyright (c) 2025 Eric E. Gold\nThis software is licensed under GPLv3\n",
                 env!("CARGO_PKG_VERSION")
             ))
-            .with_modify(Box::new(|_, servers, serv| {
+            .with_modify(Box::new(|ctx, servers, serv| {
                 let mut m_servers = servers.clone();
                 if let Some(u_serv) = m_servers
                     .iter_mut()
@@ -2162,10 +2467,10 @@ impl UiApp {
                 } else {
                     m_servers.push(serv.clone());
                 }
-                ServerItem::save_servers(m_servers.as_slice())
+                Ok(ctx.api.expect("Expected DB to be valid!").overwrite_servers_sync(m_servers.as_slice())?)
             }))
-            .with_delete(Box::new(|_, x| {
-                ServerItem::delete_server(x.server_name.as_str())
+            .with_delete(Box::new(|ctx, x| {
+                Ok(ctx.api.expect("Expected DB to be valid!").delete_server_sync(x.server_name.as_str())?)
             }))
             .do_display()
             .expect("Failed to show information!")
@@ -2173,29 +2478,86 @@ impl UiApp {
         );
     }
 
-
     #[cfg(unix)]
-    pub fn new() -> UiApp {
+    pub fn new(db: Option<String>, mnt: Option<String>) -> UiApp {
         UiApp {
             rt: Arc::new(Runtime::new().expect("Failed to start runtime!")),
             api: Arc::new(RwLock::new(None)),
             fuse: Mutex::new(None),
+            db,
+            mnt,
         }
     }
 
     #[cfg(not(unix))]
-    pub fn new() -> UiApp {
+    pub fn new(db: Option<String>) -> UiApp {
         UiApp {
             rt: Arc::new(Runtime::new().expect("Failed to start runtime!")),
             api: Arc::new(RwLock::new(None)),
+            db,
         }
     }
 }
 
+use clap::{ArgGroup, Parser};
+
+#[derive(Parser, Debug)]
+#[command(name = "Neptis")]
+#[command(about = "Neptis Front End", long_about = None)]
+pub struct CliArgs {
+    #[arg(long = "db", value_name = "PATH", env = "NEPTIS_DB")]
+    pub db: Option<String>,
+
+    /// Prevent updates from running
+    #[arg(long = "no-update")]
+    pub no_update: Option<bool>,
+
+    /// Set default FUSE mount path
+    #[cfg(unix)]
+    #[arg(long = "default-fuse", value_name = "PATH", env = "NEPTIS_MNT")]
+    pub default_fuse: Option<String>,
+
+    /// Use beta/pre-release updates instead of stable
+    #[arg(long = "beta", conflicts_with = "no_update")]
+    pub beta: Option<bool>,
+}
+
 pub fn main() {
-    unsafe {
-        std::env::set_var("RUST_BACKTRACE", "1");
+    let args = CliArgs::parse();
+    clearscreen::clear().expect("Expected to clear screen!");
+
+    if !args.no_update.unwrap_or(false) {
+        println!("*** Checking for updates...");
+        match (|| {
+            AxoUpdater::new_for("Neptis")
+                .load_receipt()?
+                .configure_version_specifier(if args.beta.unwrap_or(false) {
+                    UpdateRequest::LatestMaybePrerelease
+                } else {
+                    UpdateRequest::Latest
+                })
+                .run_sync()
+        })() {
+            Ok(x) => {
+                if let Some(ret) = x {
+                    println!("Successfully updated to {}", ret.new_version.to_string())
+                } else {
+                    println!("No updates found")
+                }
+            }
+            Err(e) => {
+                println!("FAILED to pull updates. Error: {e}");
+            }
+        }
+
+        thread::sleep(Duration::from_millis(1500));
     }
-    let app = UiApp::new();
+
+    #[cfg(unix)]
+    let app = UiApp::new(args.db, args.default_fuse);
+
+    #[cfg(not(unix))]
+    let app = UiApp::new(args.db);
+
     app.begin();
 }

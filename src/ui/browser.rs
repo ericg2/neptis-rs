@@ -1,12 +1,12 @@
 use std::{
-    cmp::Ordering, 
-    collections::HashMap, 
+    cmp::Ordering,
+    collections::HashMap,
     fs::{self, File},
-    io::{BufWriter, Write}, 
-    ops::Div, 
-    path::{Component, Path, PathBuf}, 
-    thread, 
-    time::Duration
+    io::{BufWriter, Write},
+    ops::Div,
+    path::{Component, Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 use chrono::{DateTime, Local};
@@ -36,7 +36,7 @@ impl FileBrowser {
             Component::Normal(p) => p.to_str(),
             _ => None,
         });
-    
+
         match (parts.next(), parts.next()) {
             (Some(_), Some("data")) => false, // Matches /anything/data or deeper
             _ => true,                        // All others are read-only
@@ -83,7 +83,7 @@ impl FileBrowser {
                     }
                 };
                 loop {
-                    match self.fs.do_dump(path,0, usize::MAX) {
+                    match self.fs.do_dump(path, 0, usize::MAX) {
                         Some(data) => {
                             if let Err(e) = file.write_all(&data) {
                                 println!("> Failed to write to file: {}", e);
@@ -94,7 +94,11 @@ impl FileBrowser {
                                 "> Downloaded: {} / {} ({:.2}%)",
                                 FileSize::prettify(data.len() as u64),
                                 FileSize::prettify(node.attr.size),
-                                if node.attr.size == 0 { 100f64 } else { (data.len() as f64) / (node.attr.size as f64) }
+                                if node.attr.size == 0 {
+                                    100f64
+                                } else {
+                                    (data.len() as f64) / (node.attr.size as f64)
+                                }
                             );
                             break;
                         }
@@ -176,7 +180,10 @@ impl FileBrowser {
         {
             match self.fs.do_delete(path) {
                 Some(()) => println!("> Successfully deleted."),
-                _ => { println!("> Failed to delete..."); thread::sleep(Duration::from_secs(2)); },
+                _ => {
+                    println!("> Failed to delete...");
+                    thread::sleep(Duration::from_secs(2));
+                }
             }
         }
     }
@@ -196,7 +203,10 @@ impl FileBrowser {
                     .do_write(&path, Some(&new_path), None, None, None, None, None)
                 {
                     Some(_) => println!("> Rename successful."),
-                    _ => { println!("> Failed to rename file!"); thread::sleep(Duration::from_secs(2)); },
+                    _ => {
+                        println!("> Failed to rename file!");
+                        thread::sleep(Duration::from_secs(2));
+                    }
                 }
             }
             _ => {}
@@ -217,7 +227,10 @@ impl FileBrowser {
         {
             match self.fs.do_create(&path, is_dir) {
                 Some(_) => println!("> Create successful."),
-                _ => { println!("> Failed to create file!"); thread::sleep(Duration::from_secs(2)); },
+                _ => {
+                    println!("> Failed to create file!");
+                    thread::sleep(Duration::from_secs(2));
+                }
             }
         }
     }
@@ -231,28 +244,31 @@ impl FileBrowser {
         } else {
             None
         };
-        if items.is_none() && 
+        if items.is_none() &&
             Confirm::new("This item is too large (or failed) and a preview will not be displayed. Do you want to continue")
                 .with_default(false)
                 .prompt_skippable()
                 .expect("Failed to show prompt!")
                 .map(|x|if !x { None } else { Some(x) })
-                .is_none() 
+                .is_none()
         {
             return;
         }
         match Editor::new(&format!("Modifying {}", path.to_str().unwrap()))
             .with_predefined_text(&items.unwrap_or("".into()))
             .prompt_skippable()
-            .expect("Failed to show prompt!") 
+            .expect("Failed to show prompt!")
         {
             Some(content) => {
-                match self.fs.do_write(path, None, None, Some(content.as_bytes()), None, None, None) {
+                match self
+                    .fs
+                    .do_write(path, None, None, Some(content.as_bytes()), None, None, None)
+                {
                     Some(_) => println!("> Successfully wrote the data."),
-                    None => println!("> Failed to write the data")
+                    None => println!("> Failed to write the data"),
                 }
                 thread::sleep(Duration::from_secs(1));
-            },
+            }
             _ => {}
         }
     }
@@ -271,25 +287,112 @@ impl FileBrowser {
         const STR_BACK: &'static str = "Go Back";
         const STR_UP: &'static str = "Go Up";
         const PLAINTEXT_EXTENSIONS: &[&str] = &[
-            "txt", "text", "log", "out", "nfo", "readme",
-            "c", "h", "cpp", "cc", "cxx", "hpp", "hxx",
-            "py", "pyw", "ipynb",
-            "rs", "toml", "go", "js", "ts", "jsx", "tsx",
-            "java", "kt", "kts", "rb", "php", "lua",
-            "sh", "bash", "zsh", "fish", "bat", "cmd", "ps1",
-            "swift", "scala", "cs", "vb", "pl", "pm", "r",
-            "asm", "s", "v", "sv", "vhdl", "clj", "cljs", "dart",
-            "conf", "cfg", "ini", "json", "yaml", "yml", "toml",
-            "env", "properties", "prefs", "editorconfig",
-            "md", "markdown", "rst", "asciidoc", "adoc", "tex", "textile", "pod",
-            "csv", "tsv", "psv", "jsonl", "ndjson",
-            "xml", "html", "htm", "xhtml",
-            "sql", "db", "dump",
-            "makefile", "mk", "mkfile",
-            "dockerfile", "gradle", "bazel", "bzl", "buck",
-            "gitattributes", "gitignore", "gitkeep", "gitmodules",
-            "editorconfig", "npmrc", "yarnrc", "eslintignore", "prettierrc",
-            "manifest", "license", "copying", "todo", "changelog", "credits", "authors",
+            "txt",
+            "text",
+            "log",
+            "out",
+            "nfo",
+            "readme",
+            "c",
+            "h",
+            "cpp",
+            "cc",
+            "cxx",
+            "hpp",
+            "hxx",
+            "py",
+            "pyw",
+            "ipynb",
+            "rs",
+            "toml",
+            "go",
+            "js",
+            "ts",
+            "jsx",
+            "tsx",
+            "java",
+            "kt",
+            "kts",
+            "rb",
+            "php",
+            "lua",
+            "sh",
+            "bash",
+            "zsh",
+            "fish",
+            "bat",
+            "cmd",
+            "ps1",
+            "swift",
+            "scala",
+            "cs",
+            "vb",
+            "pl",
+            "pm",
+            "r",
+            "asm",
+            "s",
+            "v",
+            "sv",
+            "vhdl",
+            "clj",
+            "cljs",
+            "dart",
+            "conf",
+            "cfg",
+            "ini",
+            "json",
+            "yaml",
+            "yml",
+            "toml",
+            "env",
+            "properties",
+            "prefs",
+            "editorconfig",
+            "md",
+            "markdown",
+            "rst",
+            "asciidoc",
+            "adoc",
+            "tex",
+            "textile",
+            "pod",
+            "csv",
+            "tsv",
+            "psv",
+            "jsonl",
+            "ndjson",
+            "xml",
+            "html",
+            "htm",
+            "xhtml",
+            "sql",
+            "db",
+            "dump",
+            "makefile",
+            "mk",
+            "mkfile",
+            "dockerfile",
+            "gradle",
+            "bazel",
+            "bzl",
+            "buck",
+            "gitattributes",
+            "gitignore",
+            "gitkeep",
+            "gitmodules",
+            "editorconfig",
+            "npmrc",
+            "yarnrc",
+            "eslintignore",
+            "prettierrc",
+            "manifest",
+            "license",
+            "copying",
+            "todo",
+            "changelog",
+            "credits",
+            "authors",
         ];
 
         loop {
@@ -298,8 +401,11 @@ impl FileBrowser {
                 x.into_iter()
                     .filter(|x| x.path != PathBuf::from(".") && x.path != PathBuf::from(".."))
                     .sorted_by(|a, b| {
-                        match (a.attr.kind == GenericFileType::Directory, b.attr.kind == GenericFileType::Directory) {
-                            (true, false) => Ordering::Less,   // directories come first
+                        match (
+                            a.attr.kind == GenericFileType::Directory,
+                            b.attr.kind == GenericFileType::Directory,
+                        ) {
+                            (true, false) => Ordering::Less, // directories come first
                             (false, true) => Ordering::Greater,
                             _ => b.attr.atime.cmp(&a.attr.atime), // if same type, sort by atime desc
                         }
@@ -328,10 +434,10 @@ impl FileBrowser {
                     match Select::new(&title, {
                         let is_rw = !self.is_read_only(&sel_path);
                         let mut keys = ret
-                        .keys()
-                        .into_iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>();
+                            .keys()
+                            .into_iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>();
                         keys.push(STR_UP.to_string());
                         if is_rw {
                             keys.push(STR_RW_MKDIR.to_string());
@@ -364,7 +470,16 @@ impl FileBrowser {
                                         actions.push(STR_RO_STAT);
                                         if f_node.attr.kind == GenericFileType::RegularFile {
                                             actions.push(STR_RO_SAVE);
-                                            if is_rw && f_node.path.extension().is_none_or(|x|PLAINTEXT_EXTENSIONS.contains(&x.to_str().unwrap().to_lowercase().as_str())) {
+                                            if is_rw
+                                                && f_node.path.extension().is_none_or(|x| {
+                                                    PLAINTEXT_EXTENSIONS.contains(
+                                                        &x.to_str()
+                                                            .unwrap()
+                                                            .to_lowercase()
+                                                            .as_str(),
+                                                    )
+                                                })
+                                            {
                                                 actions.push(STR_RW_EDIT);
                                             }
                                         }

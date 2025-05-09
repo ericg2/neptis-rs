@@ -1,19 +1,19 @@
-﻿use aes::Aes256;
+use aes::Aes256;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyInit};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use cbc::cipher::KeyIvInit;
+use cbc::cipher::block_padding::Pkcs7;
 use cbc::{Decryptor, Encryptor};
 use chrono::Utc;
 use hmac::{Hmac, Mac};
-use rand::seq::{IteratorRandom, SliceRandom};
 use rand::rngs::{OsRng, StdRng};
-use rand::{rng, Rng, RngCore, SeedableRng};
+use rand::seq::{IteratorRandom, SliceRandom};
+use rand::{Rng, RngCore, SeedableRng, rng};
 use sha2::Digest;
 use sha2::{Sha256, Sha512};
 use std::convert::TryInto;
 use std::str::Chars;
 use std::vec::Vec;
-use cbc::cipher::block_padding::Pkcs7;
 use totp_rs::Algorithm::SHA512;
 use totp_rs::{Secret, TOTP};
 
@@ -156,8 +156,6 @@ impl RollingSecret {
         let (iv, ciphertext) = encrypted_data.split_at(16);
         let cipher = Aes256CbcDec::new_from_slices(key.as_slice(), iv).ok()?;
         let mut buffer = ciphertext.to_vec();
-        cipher
-            .decrypt_padded_vec_mut::<Pkcs7>(&mut buffer)
-            .ok()
+        cipher.decrypt_padded_vec_mut::<Pkcs7>(&mut buffer).ok()
     }
 }

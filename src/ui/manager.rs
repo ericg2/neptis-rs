@@ -18,18 +18,6 @@ use crate::{
     apis::{NeptisError, api::WebApi},
 };
 
-// pub type PromptType<T> = fn(&mut T);
-// pub type PropGetType<T> = fn(&T) -> String;
-// pub type ModifyType<T> = fn(Vec<T>, &T) -> Result<(), NeptisError>;
-// pub type PullType<T> = fn() -> Result<Vec<T>, NeptisError>;
-// pub type DeleteType<T> = fn(&T) -> Result<(), NeptisError>;
-
-// pub type PromptType<T> = Box<dyn FnMut(&mut T)>;
-// pub type PropGetType<T> = Box<dyn FnMut(&T) -> String>;
-// pub type ModifyType<T> = Box<dyn FnMut(Vec<T>, &T) -> Result<(), NeptisError>>;
-// pub type PullType<T> = Box<dyn FnMut() -> Result<Vec<T>, NeptisError>>;
-// pub type DeleteType<T> = Box<dyn FnMut(&T) -> Result<(), NeptisError>>;
-
 pub struct ModelProperty<T> {
     name: String,
     is_pk: bool,
@@ -37,6 +25,7 @@ pub struct ModelProperty<T> {
     f_get: PropGetType<T>,
     for_create: bool,
     for_update: bool,
+    for_linux_only: bool,
 }
 
 impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
@@ -47,6 +36,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
         f_get: PropGetType<T>,
         for_create: bool,
         for_update: bool,
+        for_linux_only: bool,
     ) -> Self {
         Self {
             is_pk,
@@ -55,6 +45,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
             f_get: f_get.into(),
             for_create,
             for_update,
+            for_linux_only,
         }
     }
 
@@ -64,7 +55,16 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
         f_prompt: PromptType<T>,
         f_get: PropGetType<T>,
     ) -> Self {
-        Self::_new(name, is_pk, f_prompt, f_get, true, true)
+        Self::_new(name, is_pk, f_prompt, f_get, true, true, false)
+    }
+
+    pub fn new_for_linux_only(
+        name: impl Into<String>,
+        is_pk: bool,
+        f_prompt: PromptType<T>,
+        f_get: PropGetType<T>,
+    ) -> Self {
+        Self::_new(name, is_pk, f_prompt, f_get, true, false, true)
     }
 
     pub fn new_for_update_only(
@@ -73,7 +73,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
         f_prompt: PromptType<T>,
         f_get: PropGetType<T>,
     ) -> Self {
-        Self::_new(name, is_pk, f_prompt, f_get, false, true)
+        Self::_new(name, is_pk, f_prompt, f_get, false, true, false)
     }
 
     pub fn new_for_create_only(
@@ -82,7 +82,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
         f_prompt: PromptType<T>,
         f_get: PropGetType<T>,
     ) -> Self {
-        Self::_new(name, is_pk, f_prompt, f_get, true, false)
+        Self::_new(name, is_pk, f_prompt, f_get, true, false, false)
     }
 }
 
@@ -108,29 +108,31 @@ pub trait ToShortIdString {
     fn to_short_id_string(&self) -> String;
 }
 
-// pub type PromptType<T> = Box<dyn FnMut(&mut T)>;
-// pub type PropGetType<T> = Box<dyn FnMut(&T) -> String>;
-// pub type ModifyType<T> = Box<dyn FnMut(Vec<T>, &T) -> Result<(), NeptisError>>;
-// pub type PullType<T> = Box<dyn FnMut() -> Result<Vec<T>, NeptisError>>;
-// pub type DeleteType<T> = Box<dyn FnMut(&T) -> Result<(), NeptisError>>;
-pub struct ApiContext<'a> {
+pub struct ApiContext<'a, A> {
     pub rt: Runtime,
-    pub api: Option<&'a WebApi>,
+    pub api: Option<&'a A>,
 }
 
-pub type PromptType<T> = fn(&mut T);
-pub type PropGetType<T> = fn(&T) -> String;
-pub type ModifyType<T> = Box<dyn FnMut(&mut ApiContext, Vec<T>, &T) -> Result<(), NeptisError>>;
-pub type PullType<T> = Box<dyn FnMut(&mut ApiContext) -> Result<Vec<T>, NeptisError>>;
-pub type DeleteType<T> = Box<dyn FnMut(&mut ApiContext, &T) -> Result<(), NeptisError>>;
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub enum PromptResult {
+    Ok,
+    Cancel,
+}
 
-pub struct ModelManager<'a, T> {
+pub type PromptType<T> = fn(&mut T) -> PromptResult;
+pub type PropGetType<T> = fn(&T) -> String;
+pub type ModifyType<T, A> =
+    Box<dyn FnMut(&mut ApiContext<'_, A>, Vec<T>, &T) -> Result<(), NeptisError>>;
+pub type PullType<T, A> = Box<dyn FnMut(&mut ApiContext<'_, A>) -> Result<Vec<T>, NeptisError>>;
+pub type DeleteType<T, A> = Box<dyn FnMut(&mut ApiContext<'_, A>, &T) -> Result<(), NeptisError>>;
+
+pub struct ModelManager<'a, T, A> {
     properties: Vec<ModelProperty<T>>,
     options: Vec<ModelExtraOption<'a, T>>,
     allow_back: bool,
-    func_update_item: Option<ModifyType<T>>,
-    func_delete_item: Option<DeleteType<T>>,
-    func_pull_items: PullType<T>,
+    func_update_item: Option<ModifyType<T, A>>,
+    func_delete_item: Option<DeleteType<T, A>>,
+    func_pull_items: PullType<T, A>,
     str_select: String,
     str_create: String,
     str_edit: String,
@@ -138,14 +140,14 @@ pub struct ModelManager<'a, T> {
     str_select_title: String,
     str_create_title: String,
     str_modify_title: String,
-    ctx: ApiContext<'a>,
+    ctx: ApiContext<'a, A>,
 }
 
-impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
+impl<'a, T: Clone + ToShortIdString + Default, A> ModelManager<'a, T, A> {
     pub fn new(
-        api: Option<&'a WebApi>,
+        api: Option<&'a A>,
         properties: Vec<ModelProperty<T>>,
-        func_pull_items: PullType<T>,
+        func_pull_items: PullType<T, A>,
     ) -> Self {
         let ctx = ApiContext {
             api,
@@ -176,6 +178,7 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
         is_pk: bool,
         for_create: bool,
         for_update: bool,
+        for_linux_only: bool,
     ) -> Self {
         self.properties.push(ModelProperty {
             name: name.into(),
@@ -184,26 +187,25 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
             is_pk,
             for_create,
             for_update,
+            for_linux_only,
         });
         self
     }
 
-    pub fn with_modify(mut self, func: ModifyType<T>) -> ModelManager<'a, T> {
+    pub fn with_modify(mut self, func: ModifyType<T, A>) -> Self {
         self.func_update_item = Some(func.into());
         self
     }
-    pub fn with_delete(mut self, func: DeleteType<T>) -> ModelManager<'a, T> {
+    pub fn with_delete(mut self, func: DeleteType<T, A>) -> Self {
         self.func_delete_item = Some(func.into());
         self
     }
-    // pub fn with_options(mut self, options: impl Into<Vec<ModelExtraOption<'a, T>>>) -> Self {
-    //     self.options = options.into();
-    //     self
-    // }
+
     pub fn can_modify(&self) -> bool {
         self.func_update_item.is_some()
     }
-    pub fn with_back(mut self) -> ModelManager<'a, T> {
+
+    pub fn with_back(mut self) -> Self {
         self.allow_back = true;
         self
     }
@@ -228,10 +230,27 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
     }
 
     fn show_manage_item(&mut self, item: Option<T>, multi: bool) -> Result<Vec<T>, NeptisError> {
+        mod platform {
+            #[cfg(unix)]
+            pub fn do_skip() -> bool {
+                false
+            }
+
+            #[cfg(not(unix))]
+            pub fn do_skip() -> bool {
+                true
+            }
+        }
+
         let allow_pk = item.is_none();
         let mut use_item = item.clone().unwrap_or_default();
+        let mut cancel = false;
         // Iterate through each element to begin managing.
         loop {
+            if cancel {
+                break;
+            }
+
             clearscreen::clear().unwrap();
             println!("Neptis Management");
             println!("You will be asked to confirm all this information.");
@@ -251,8 +270,17 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
                     continue; // if updating and not for update
                 }
                 if !prop.is_pk || allow_pk {
-                    (&mut prop.f_prompt)(&mut use_item);
+                    if (&mut prop.f_prompt)(&mut use_item) == PromptResult::Cancel {
+                        cancel = true;
+                        break;
+                    }
                 }
+                if prop.for_linux_only && platform::do_skip() {
+                    continue;
+                }
+            }
+            if cancel {
+                break;
             }
 
             // Make sure there are no primary key issues
@@ -314,6 +342,7 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
                 "{}",
                 self.properties
                     .iter_mut()
+                    .filter(|x| !(x.for_linux_only && platform::do_skip()))
                     .map(|x| format!("> {} -> '{}'", x.name, (&mut x.f_get)(&use_item)))
                     .collect::<Vec<_>>()
                     .join("\n")
@@ -323,11 +352,12 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
                 "Are you sure this is correct?",
                 vec!["Go Back", "No", "Yes", "Reset"],
             )
-            .prompt()
+            .prompt_skippable()
+            .map(|x| if x == Some("Go Back") { None } else { x })
             .expect("Failed to show prompt!")
             {
-                "Yes" => break,
-                "Reset" => {
+                Some("Yes") => break,
+                Some("Reset") => {
                     if let Some(i) = item.clone() {
                         use_item = i;
                     } else {
@@ -335,14 +365,17 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
                     }
                     continue;
                 }
-                "Go Back" => return self.do_raw_display(multi),
+                None => return self.do_raw_display(multi),
                 _ => continue,
             }
         }
+
         // Do the delete/add and proceed.
-        if let Some(ref mut func) = self.func_update_item {
-            let all_items = (self.func_pull_items)(&mut self.ctx)?;
-            (func)(&mut self.ctx, all_items, &use_item)?;
+        if !cancel {
+            if let Some(ref mut func) = self.func_update_item {
+                let all_items = (self.func_pull_items)(&mut self.ctx)?;
+                (func)(&mut self.ctx, all_items, &use_item)?;
+            }
         }
 
         return self.do_raw_display(multi);
@@ -363,8 +396,9 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
         }
 
         if Confirm::new("This is a destructive action. Are you sure?")
-            .prompt()
+            .prompt_skippable()
             .expect("Failed to show prompt!")
+            == Some(true)
         {
             if let Some(ref mut func) = self.func_delete_item {
                 for item in items {
@@ -393,25 +427,22 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
                 s_items.push(self.str_create.clone());
             }
             if multi {
-                MultiSelect::new(self.str_select_title.as_str(), s_items)
-                    .with_page_size(30)
-                    // .with_validator(|selection: &[ListOption<&String>]| {
-                    //     if selection.is_empty() {
-                    //         return Ok(Validation::Invalid(
-                    //             "You must select at least one option.".into(),
-                    //         ));
-                    //     }
-                    //     Ok(Validation::Valid)
-                    // })
-                    .prompt()
+                match MultiSelect::new(self.str_select_title.as_str(), s_items)
+                    .prompt_skippable()
                     .expect("Failed to show prompt!")
+                {
+                    Some(x) => x,
+                    None => vec!["Go Back".to_string()],
+                }
             } else {
-                vec![
-                    Select::new(self.str_select_title.as_str(), s_items)
-                        .with_page_size(30)
-                        .prompt()
-                        .expect("Failed to show prompt!"),
-                ]
+                vec![match Select::new(self.str_select_title.as_str(), s_items)
+                    .with_page_size(30)
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                {
+                    Some(x) => x,
+                    None => "Go Back".to_string(),
+                }]
             }
         };
 
@@ -441,7 +472,7 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
             {
                 return Ok(f_items);
             }
-            let action_sel = Select::new(format!("Action for '{}'", action_title).as_str(), {
+            let action_sel = match Select::new(format!("Action for '{}'", action_title).as_str(), {
                 let mut all_actions = vec![self.str_select.clone()];
                 all_actions.extend(self.options.iter().map(|x| x.name.clone()));
                 if self.func_update_item.is_some() && f_items.len() == 1 {
@@ -453,8 +484,12 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelManager<'a, T> {
                 all_actions.push("Go Back".to_string());
                 all_actions
             })
-            .prompt()
-            .expect("Failed to display prompt!");
+            .prompt_skippable()
+            .expect("Failed to display prompt!")
+            {
+                Some(x) => x,
+                None => "Go Back".to_string(),
+            };
             if action_sel == self.str_select {
                 Ok(f_items)
             } else if action_sel == self.str_edit && self.func_update_item.is_some() {

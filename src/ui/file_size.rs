@@ -73,8 +73,12 @@ impl ToString for FileSize {
 }
 
 impl FileSize {
-    pub fn get_bytes(&self) -> u64 { self.bytes }
-    pub fn get_text(&self) -> &str { self.text.as_str() }
+    pub fn get_bytes(&self) -> u64 {
+        self.bytes
+    }
+    pub fn get_text(&self) -> &str {
+        self.text.as_str()
+    }
 
     pub fn prettify(bytes: u64) -> String {
         Self::from_bytes(bytes).to_string()

@@ -1,13 +1,13 @@
 use std::error;
 use std::fmt;
 
-
 #[derive(Debug)]
 pub enum NeptisError {
     Api(reqwest::Error),
     Serde(serde_json::Error),
     Io(std::io::Error),
-    Str(String)
+    Sql(sqlx::Error),
+    Str(String),
 }
 
 impl fmt::Display for NeptisError {
@@ -16,7 +16,8 @@ impl fmt::Display for NeptisError {
             NeptisError::Api(e) => ("reqwest", e.to_string()),
             NeptisError::Serde(e) => ("serde", e.to_string()),
             NeptisError::Io(e) => ("IO", e.to_string()),
-            NeptisError::Str(e) => ("custom", e.to_string())
+            NeptisError::Str(e) => ("custom", e.to_string()),
+            NeptisError::Sql(e) => ("SQL", e.to_string()),
         };
         write!(f, "error in {}: {}", module, e)
     }
@@ -28,6 +29,7 @@ impl error::Error for NeptisError {
             NeptisError::Api(e) => e,
             NeptisError::Serde(e) => e,
             NeptisError::Io(e) => e,
+            NeptisError::Sql(e) => e,
             NeptisError::Str(_) => return None,
         })
     }
@@ -48,6 +50,12 @@ impl From<serde_json::Error> for NeptisError {
 impl From<std::io::Error> for NeptisError {
     fn from(e: std::io::Error) -> Self {
         NeptisError::Io(e)
+    }
+}
+
+impl From<sqlx::Error> for NeptisError {
+    fn from(e: sqlx::Error) -> Self {
+        NeptisError::Sql(e)
     }
 }
 
@@ -72,8 +80,10 @@ pub fn parse_deep_object(prefix: &str, value: &serde_json::Value) -> Vec<(String
                             value,
                         ));
                     }
-                },
-                serde_json::Value::String(s) => params.push((format!("{}[{}]", prefix, key), s.clone())),
+                }
+                serde_json::Value::String(s) => {
+                    params.push((format!("{}[{}]", prefix, key), s.clone()))
+                }
                 _ => params.push((format!("{}[{}]", prefix, key), value.to_string())),
             }
         }
@@ -84,6 +94,5 @@ pub fn parse_deep_object(prefix: &str, value: &serde_json::Value) -> Vec<(String
     unimplemented!("Only objects are supported with style=deepObject")
 }
 
-
-pub mod dtos;
 pub mod api;
+pub mod dtos;
