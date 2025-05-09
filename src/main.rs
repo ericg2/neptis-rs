@@ -2529,7 +2529,7 @@ pub fn main() {
     if !args.no_update.unwrap_or(false) {
         println!("*** Checking for updates...");
         match (|| {
-            AxoUpdater::new_for("Neptis")
+            AxoUpdater::new_for("neptis-rs")
                 .load_receipt()?
                 .configure_version_specifier(if args.beta.unwrap_or(false) {
                     UpdateRequest::LatestMaybePrerelease
