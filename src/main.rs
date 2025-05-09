@@ -2094,40 +2094,35 @@ impl UiApp {
                 }
             }
         }
-        // Show menu with "Go Back"
-        match inquire::Select::new(
-            "Please select an action",
-            if is_admin {
-                vec![
-                    STR_BACK,
-                    STR_BROWSER,
-                    STR_FUSE,
-                    STR_BREAKDOWN,
-                    STR_POINTS,
-                    STR_USERS,
-                    STR_SYSTEM,
-                    STR_PASSWORD,
-                    STR_SMB,
-                    STR_LOGOUT,
-                ]
-            } else {
-                vec![
-                    STR_BACK,
-                    STR_BROWSER,
-                    STR_FUSE,
-                    STR_BREAKDOWN,
-                    STR_POINTS,
-                    STR_PASSWORD,
-                    STR_SMB,
-                    STR_LOGOUT,
-                ]
-            },
-        )
-        .prompt_skippable()
-        .expect("Failed to show prompt!")
+        let mut menu_items = vec![STR_BACK, STR_BROWSER];
+
+        #[cfg(unix)]
+        {
+            menu_items.push(STR_FUSE);
+        }
+
+        menu_items.push(STR_BREAKDOWN);
+        menu_items.push(STR_POINTS);
+
+        if is_admin {
+            menu_items.push(STR_USERS);
+            menu_items.push(STR_SYSTEM);
+        }
+
+        menu_items.push(STR_PASSWORD);
+        menu_items.push(STR_SMB);
+        menu_items.push(STR_LOGOUT);
+
+        // Show menu
+        match inquire::Select::new("Please select an action", menu_items)
+            .prompt_skippable()
+            .expect("Failed to show prompt!")
         {
             Some(STR_BROWSER) => self.start_browser(),
+
+            #[cfg(unix)]
             Some(STR_FUSE) => self.start_fuse(false),
+
             Some(STR_BREAKDOWN) => self.show_point_breakdown(),
             Some(STR_POINTS) => self.show_points(),
             Some(STR_USERS) => self.show_users(),
@@ -2135,7 +2130,6 @@ impl UiApp {
             Some(STR_PASSWORD) => self.show_change_password(),
             Some(STR_SMB) => self.show_smb(),
             Some(STR_BACK) => {
-                // Call show_dashboard again to resume auto-refresh
                 clearscreen::clear().expect("Failed to clear screen!");
                 self.show_dashboard();
             }
@@ -2145,8 +2139,6 @@ impl UiApp {
                 process::exit(0);
             }
             _ => {
-                // The user may have mistakenly hit ESC again. Ask if they want
-                // to logout or simply do nothing.
                 clearscreen::clear().expect("Failed to clear screen!");
                 if Confirm::new("Do you want to logout?")
                     .with_default(false)
@@ -2395,9 +2387,13 @@ impl UiApp {
                     *api = Some(x)
                 }
                 println!("Connection successful!");
-                if server.auto_fuse {
-                    self.start_fuse(true);
+                #[cfg(unix)]
+                {
+                    if server.auto_fuse {
+                        self.start_fuse(true);
+                    }
                 }
+
                 self.show_dashboard();
             }
             Err(e) => {
@@ -2713,7 +2709,7 @@ impl UiApp {
     }
 
     #[cfg(not(unix))]
-    pub fn new(db: Option<String>) -> UiApp {
+    pub fn new(db_path: Option<String>) -> UiApp {
         let rt = Arc::new(Runtime::new().expect("Expected Runtime to start!"));
         let db = DbController::new(rt.clone(), &Self::get_db(db_path));
         UiApp {
