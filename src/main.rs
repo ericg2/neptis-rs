@@ -17,9 +17,15 @@ pub mod models;
 pub mod rolling_secret;
 pub mod ui;
 
+use crate::apis::dtos::AlertMode;
+use crate::apis::dtos::AlertTrigger;
 use crate::ui::file_size::FileSize;
-
-use apis::dtos::{AutoJobType, JobStatus, JobType, PutForAutoJobWebApi, RepoJobDto};
+use apis::dtos::PostForMessageApi;
+use apis::dtos::PostForSubscriptionApi;
+use apis::dtos::PutForSubscriptionApi;
+use apis::dtos::{
+    AutoJobType, JobStatus, JobType, PutForAutoJobWebApi, RepoJobDto, SubscriptionDto,
+};
 use arduino_secret::ArduinoSecret;
 use axoupdater::{
     AxoUpdater, AxoupdateError, ReleaseSource, ReleaseSourceType, UpdateRequest, Version,
@@ -29,9 +35,11 @@ use cron::Schedule;
 use db::controller::DbController;
 use db::server::ServerItem;
 use filesystem::NeptisFS;
-use inquire::Editor;
+use inquire::list_option::ListOption;
+use inquire::{Editor, MultiSelect};
 use reqwest::ClientBuilder;
 use std::ffi::OsStr;
+use std::iter::once;
 use std::process;
 use std::str::FromStr;
 use ui::browser::FileBrowser;
@@ -274,7 +282,7 @@ impl UiApp {
     }
 
     // inspected
-    fn on_select_job(&self, mount: &str, j_id: Uuid) {
+    fn on_select_job(&self, mount: &str, j_id: Uuid, point: Option<String>) {
         use crossterm::{
             event::{self, Event, KeyCode},
             terminal::{disable_raw_mode, enable_raw_mode},
@@ -286,9 +294,9 @@ impl UiApp {
         let mut last_refresh = Instant::now();
         let mut first_time = true;
         loop {
-            // Refresh job details every 10 seconds
-            if first_time || last_refresh.elapsed().as_secs() >= 10 {
-                first_time = true;
+            // Refresh job details every 5 seconds
+            if first_time || last_refresh.elapsed().as_secs() >= 5 {
+                first_time = false;
                 clearscreen::clear().expect("Failed to clear screen!");
                 let result = {
                     let m_api = &*self.api.read().unwrap();
@@ -437,7 +445,11 @@ impl UiApp {
             }
         }
 
-        self.on_view_jobs(mount, None);
+        if let Some(p) = point {
+            self.on_select_mount(&p);
+        } else {
+            self.on_view_jobs(mount, None);
+        }
     }
 
     // inspected
@@ -499,7 +511,7 @@ impl UiApp {
 
         match ret {
             Ok(x) => match x {
-                Some(dto) => self.on_select_job(mount, dto.id),
+                Some(dto) => self.on_select_job(mount, dto.id, None),
                 None => self.on_select_mount(mount),
             },
             Err(e) => {
@@ -884,7 +896,7 @@ impl UiApp {
                         Ok(x) => {
                             println!("**** Job created successfully! ID: {}", x.id);
                             thread::sleep(Duration::from_secs(2));
-                            self.on_select_job(mount, x.id.clone());
+                            self.on_select_job(mount, x.id.clone(), Some(mount.to_string()));
                         }
                         Err(e) => {
                             println!(
@@ -1351,6 +1363,196 @@ impl UiApp {
         }
     }
 
+    fn show_notifications(&self) {
+        let ret = {
+            let m_api = &*self.api.read().unwrap();
+            if let Some(api) = m_api {
+                ModelManager::new(
+                    Some(api),
+                    vec![
+                        ModelProperty::new(
+                            "Alert Mode",
+                            false,
+                            |dto: &mut SubscriptionDto| match CustomType::<AlertMode>::new(
+                                "Please enter the Mode (Discord/Email/Post)",
+                            )
+                            .with_starting_input(&dto.mode.to_string())
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.mode = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
+                            },
+                            |x| x.mode.to_string(),
+                        ),
+                        ModelProperty::new(
+                            "Endpoint",
+                            false,
+                            |dto: &mut SubscriptionDto| match Text::new("Please enter the endpoint")
+                                .with_initial_value(&dto.endpoint.to_string())
+                                .with_validator(required!())
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.endpoint = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
+                            },
+                            |x| x.endpoint.clone(),
+                        ),
+                        ModelProperty::new(
+                            "Triggers",
+                            false,
+                            |dto: &mut SubscriptionDto| {
+                                let opts = vec![
+                                    AlertTrigger::UserMessage,
+                                    AlertTrigger::PointCreated,
+                                    AlertTrigger::PointModified,
+                                    AlertTrigger::PointDeleted,
+                                    AlertTrigger::JobStarted,
+                                    AlertTrigger::JobFinished,
+                                    AlertTrigger::JobError,
+                                    AlertTrigger::ServerShutdown,
+                                    AlertTrigger::ServerRestart,
+                                    AlertTrigger::AutoJobCreated,
+                                    AlertTrigger::AutoJobModified,
+                                    AlertTrigger::AutoJobDeleted,
+                                    AlertTrigger::SnapshotLocked,
+                                    AlertTrigger::SnapshotUnlocked,
+                                    AlertTrigger::SnapshotDeleted,
+                                ];
+                                match MultiSelect::new("Please select all triggers", opts.clone())
+                                    .with_validator(|choices: &[ListOption<&AlertTrigger>]| {
+                                        if choices.is_empty() {
+                                            Ok(Validation::Invalid(
+                                                "Please select at least one trigger.".into(),
+                                            ))
+                                        } else {
+                                            Ok(Validation::Valid)
+                                        }
+                                    })
+                                    .with_default(
+                                        &opts
+                                            .iter()
+                                            .enumerate()
+                                            .filter_map(|(i, val)| {
+                                                if dto.triggers.contains(val) {
+                                                    Some(i)
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    )
+                                    .prompt_skippable()
+                                    .expect("Failed to show prompt!")
+                                {
+                                    Some(x) => {
+                                        dto.triggers = x;
+                                        PromptResult::Ok
+                                    }
+                                    None => PromptResult::Cancel,
+                                }
+                            },
+                            |x| {
+                                x.triggers
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            },
+                        ),
+                        ModelProperty::new(
+                            "Enabled",
+                            false,
+                            |dto: &mut SubscriptionDto| match Confirm::new("Do you want it enabled")
+                                .with_default(dto.enabled)
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                            {
+                                Some(x) => {
+                                    dto.enabled = x;
+                                    PromptResult::Ok
+                                }
+                                None => PromptResult::Cancel,
+                            },
+                            |x| x.enabled.to_string(),
+                        ),
+                    ],
+                    Box::new(|ctx| {
+                        let api = ctx
+                            .api
+                            .as_deref()
+                            .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                        ctx.rt
+                            .block_on(async move { api.get_all_subscriptions().await })
+                    }),
+                )
+                .with_delete(Box::new(|ctx, dto| {
+                    let api = ctx
+                        .api
+                        .as_deref()
+                        .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                    ctx.rt.block_on(async move {
+                        api.delete_one_subscription(&dto.id.to_string()).await
+                    })
+                }))
+                .with_modify(Box::new(|ctx, current_subs, dto| {
+                    let api = ctx
+                        .api
+                        .as_deref()
+                        .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                    let is_creating = !current_subs.iter().any(|x| x.id == dto.id);
+                    ctx.rt.block_on(async move {
+                        if is_creating {
+                            api.post_one_subscription(PostForSubscriptionApi {
+                                mode: dto.mode.clone(),
+                                enabled: dto.enabled,
+                                endpoint: dto.endpoint.clone(),
+                                triggers: dto.triggers.clone(),
+                            })
+                            .await
+                        } else {
+                            api.put_one_subscription(
+                                &dto.id.to_string(),
+                                PutForSubscriptionApi {
+                                    mode: Some(dto.mode.clone()),
+                                    endpoint: Some(dto.endpoint.clone()),
+                                    triggers: Some(dto.triggers.clone()),
+                                    enabled: Some(dto.enabled),
+                                },
+                            )
+                            .await
+                            .map(|_| ())
+                        }
+                        .map(|_| ())
+                    })
+                }))
+                .with_back()
+                .do_display()
+            } else {
+                Err(NeptisError::Str("API is invalid!".into()))
+            }
+        };
+        match ret {
+            Err(e) => {
+                clearscreen::clear().expect("Failed to clear screen!");
+                println!(
+                    "**** An unexpected error has occurred. Clearing in 5 secs: {}",
+                    e.to_string()
+                );
+                thread::sleep(Duration::from_secs(5));
+                self.begin();
+            }
+            _ => self.show_dashboard(),
+        }
+    }
+
     // inspected
     fn show_users(&self) {
         let ret = {
@@ -1600,7 +1802,7 @@ impl UiApp {
         const STR_BACK: &str = "Go Back";
         let mut last_refresh = Instant::now();
         let mut first_time: bool = true;
-        let mut running_jobs = vec![];
+        let mut is_safe: bool = false;
         loop {
             if first_time || last_refresh.elapsed().as_secs() >= 10 {
                 first_time = false;
@@ -1622,25 +1824,20 @@ impl UiApp {
                 if ret.is_err() {
                     println!("**** Failed to show system information!");
                 }
-                running_jobs = {
+                is_safe = {
                     let m_api = &*self.api.read().unwrap();
                     if let Some(api) = m_api {
-                        self.rt.block_on(async {
-                            api.get_all_jobs(MAX_JOBS, Some(0)).await.unwrap_or(vec![])
-                        })
+                        self.rt
+                            .block_on(async { api.can_kill_safe().await.unwrap_or(false) })
                     } else {
                         self.show_dashboard();
                         return;
                     }
-                }
-                .into_iter()
-                .filter(|x| x.job_status == JobStatus::Running)
-                .collect::<Vec<_>>();
+                };
 
-                if running_jobs.len() > 0 {
+                if !is_safe {
                     println!(
-                        "***** WARNING: Shutdown / Restart is unsafe due to {} job(s) running!",
-                        running_jobs.len()
+                        "***** WARNING: The server has indicated that Shutdown / Restart is unsafe!\nThis can be due to several factors: including running jobs,\nSMB restarts, or others.",
                     );
                 }
                 println!("\n\nPress <ENTER> to show options...");
@@ -1680,19 +1877,12 @@ impl UiApp {
         .expect("Failed to show prompt!")
         .unwrap_or(STR_BACK);
 
-        fn handle_unsafe(jobs: &[RepoJobDto]) -> bool {
-            let j_count = jobs.iter().count();
-            if j_count <= 0 {
+        fn handle_unsafe(is_safe: bool) -> bool {
+            if is_safe {
                 return true;
             }
             clearscreen::clear().expect("Failed to clear screen!");
-            println!(
-                "**** DANGER: Powering down the system will corrupt {} job(s):",
-                j_count
-            );
-            for job in jobs {
-                println!("{}", job.to_short_id_string());
-            }
+            println!("**** DANGER: Powering down the system may corrupt jobs or services!");
             println!("\n");
             Confirm::new("Please confirm your decision")
                 .prompt_skippable()
@@ -1703,7 +1893,7 @@ impl UiApp {
         match choice {
             STR_REFRESH => self.show_system(),
             STR_SHUTDOWN => {
-                if !handle_unsafe(running_jobs.as_slice()) {
+                if !handle_unsafe(is_safe) {
                     self.show_dashboard();
                 } else {
                     let result = {
@@ -1719,7 +1909,7 @@ impl UiApp {
             }
 
             STR_RESTART => {
-                if !handle_unsafe(running_jobs.as_slice()) {
+                if !handle_unsafe(is_safe) {
                     self.show_dashboard();
                 } else {
                     let result = {
@@ -2020,6 +2210,157 @@ impl UiApp {
         self.show_dashboard();
     }
 
+    fn send_message(&self, clear: bool) {
+        if clear {
+            clearscreen::clear().expect("Failed to clear screen!");
+        }
+        // Pull the list of all users for auto-complete.
+        let u_ret = {
+            let m_api = &*self.api.read().unwrap();
+            if let Some(api) = m_api {
+                self.rt.block_on(async move { api.get_all_users().await })
+            } else {
+                Err(NeptisError::Str("API is invalid!".into()))
+            }
+        };
+        match u_ret {
+            Ok(users) => {
+                let mut opts = users
+                    .iter()
+                    .map(|x| x.to_short_id_string())
+                    .collect::<Vec<_>>();
+                opts.insert(0, "Everyone".into());
+                if let Some(sel_id) = Select::new("Send To", opts)
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                {
+                    let sel_user = if sel_id == "Everyone" {
+                        None
+                    } else {
+                        Some(
+                            users
+                                .iter()
+                                .find(|x| x.to_short_id_string() == sel_id)
+                                .map(|x| x.user_name.clone())
+                                .expect("Expected ID to be available on user list!"),
+                        )
+                    };
+                    if let Some(msg) = Text::new("Enter Message")
+                        .with_validator(required!())
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                    {
+                        // Send the message to the specified user.
+                        println!("\n*** Sending message...");
+                        if let Err(e) = {
+                            let m_api = &*self.api.read().unwrap();
+                            if let Some(api) = m_api {
+                                self.rt.block_on(async move {
+                                    api.send_one_message(PostForMessageApi {
+                                        sent_to: sel_user,
+                                        message: msg,
+                                    })
+                                    .await
+                                })
+                            } else {
+                                Err(NeptisError::Str("API is invalid!".into()))
+                            }
+                        } {
+                            println!(
+                                "**** An unexpected error has occurred. ****\n{}",
+                                e.to_string()
+                            );
+                            thread::sleep(Duration::from_secs(2));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                println!(
+                    "**** An unexpected error has occurred. ****\n{}",
+                    e.to_string()
+                );
+                thread::sleep(Duration::from_secs(2));
+            }
+        }
+    }
+
+    fn show_messages(&self) {
+        use crossterm::{
+            event::{self, Event, KeyCode},
+            terminal::{disable_raw_mode, enable_raw_mode},
+        };
+        let ret = {
+            let m_api = &*self.api.read().unwrap();
+            if let Some(api) = m_api {
+                self.rt
+                    .block_on(async move { api.get_all_messages(false).await })
+            } else {
+                Err(NeptisError::Str("API is invalid!".into()))
+            }
+        };
+        match ret {
+            Ok(messages) => {
+                const PAGE_SIZE: usize = 10;
+                let mut offset = messages.len().saturating_sub(PAGE_SIZE);
+
+                loop {
+                    clearscreen::clear().expect("Failed to clear screen!");
+                    println!(
+                        "*** Showing messages {} to {} ***\n",
+                        offset + 1,
+                        usize::min(offset + PAGE_SIZE, messages.len())
+                    );
+
+                    // Get a page of messages
+                    let end = usize::min(offset + PAGE_SIZE, messages.len());
+                    let page = &messages[offset..end];
+
+                    // Display each message
+                    for msg in page {
+                        println!("{}\n", msg.to_short_id_string());
+                    }
+
+                    println!("\nUse left and right arrows to traverse | 's' to send | 'q' to exit");
+
+                    enable_raw_mode().expect("Failed to enable raw mode");
+                    let result = event::read();
+                    disable_raw_mode().expect("Failed to disable raw mode");
+
+                    match result {
+                        Ok(Event::Key(key)) => match key.code {
+                            KeyCode::Left => {
+                                offset = offset.saturating_sub(PAGE_SIZE);
+                            }
+                            KeyCode::Right => {
+                                if offset + PAGE_SIZE < messages.len() {
+                                    offset += PAGE_SIZE;
+                                }
+                            }
+                            KeyCode::Char('q') | KeyCode::Enter => {
+                                break;
+                            }
+                            KeyCode::Char('s') => {
+                                // Ask about sending the message.
+                                self.send_message(true);
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    }
+                }
+            }
+            Err(e) => {
+                println!(
+                    "**** An unexpected error has occurred. ****\n{}",
+                    e.to_string()
+                );
+                thread::sleep(Duration::from_secs(2));
+            }
+        }
+        self.show_dashboard();
+    }
+
     // inspected
     fn show_dashboard(&self) {
         use crossterm::{
@@ -2035,8 +2376,10 @@ impl UiApp {
         const STR_BROWSER: &str = "File Browser";
         const STR_FUSE: &str = "Start FUSE";
         const STR_BREAKDOWN: &str = "Show Usage Breakdown";
+        const STR_MESSAGE: &str = "View Messages";
         const STR_POINTS: &str = "Manage Points";
         const STR_USERS: &str = "Manage Users";
+        const STR_NOTIFICATION: &str = "Manage Notifications";
         const STR_SYSTEM: &str = "Manage System";
         const STR_SMB: &str = "Manage SMB";
         const STR_PASSWORD: &str = "Change Password";
@@ -2056,6 +2399,20 @@ impl UiApp {
                     is_admin = admin;
                     println!("Connection: {}\n", api.to_string());
                     println!("{}", s);
+                    if let Ok(ret) = self.rt.block_on(async { api.get_all_messages(true).await }) {
+                        let r_len = ret.len();
+                        if r_len > 0 {
+                            println!(
+                                "*** You have {} new message{}!",
+                                r_len,
+                                if r_len == 1 {
+                                    String::new()
+                                } else {
+                                    "s".to_string()
+                                }
+                            );
+                        }
+                    }
                     println!(
                         "\n============== Top {} Jobs:\n{}\n\n",
                         MAX_JOBS,
@@ -2101,6 +2458,7 @@ impl UiApp {
             menu_items.push(STR_FUSE);
         }
 
+        menu_items.push(STR_MESSAGE);
         menu_items.push(STR_BREAKDOWN);
         menu_items.push(STR_POINTS);
 
@@ -2109,6 +2467,7 @@ impl UiApp {
             menu_items.push(STR_SYSTEM);
         }
 
+        menu_items.push(STR_NOTIFICATION);
         menu_items.push(STR_PASSWORD);
         menu_items.push(STR_SMB);
         menu_items.push(STR_LOGOUT);
@@ -2129,6 +2488,8 @@ impl UiApp {
             Some(STR_SYSTEM) => self.show_system(),
             Some(STR_PASSWORD) => self.show_change_password(),
             Some(STR_SMB) => self.show_smb(),
+            Some(STR_NOTIFICATION) => self.show_notifications(),
+            Some(STR_MESSAGE) => self.show_messages(),
             Some(STR_BACK) => {
                 clearscreen::clear().expect("Failed to clear screen!");
                 self.show_dashboard();
@@ -2144,7 +2505,7 @@ impl UiApp {
                     .with_default(false)
                     .prompt_skippable()
                     .expect("Failed to show prompt!")
-                    .unwrap_or(false)
+                    .unwrap_or(true)
                 {
                     clearscreen::clear().expect("Failed to clear screen!");
                     println!("Logout\n");

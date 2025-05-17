@@ -82,30 +82,21 @@ impl FileBrowser {
                         return;
                     }
                 };
-                loop {
-                    match self.fs.do_dump(path, 0, usize::MAX) {
-                        Some(data) => {
-                            if let Err(e) = file.write_all(&data) {
-                                println!("> Failed to write to file: {}", e);
-                                break;
-                            }
+                match self.fs.do_dump(path, 0, usize::MAX) {
+                    Some(data) => {
+                        if let Err(e) = file.write_all(&data) {
+                            println!("> Failed to write to file: {}", e);
+                        } else {
                             let _ = file.flush();
                             println!(
-                                "> Downloaded: {} / {} ({:.2}%)",
+                                "> Downloaded: {} / {}",
                                 FileSize::prettify(data.len() as u64),
                                 FileSize::prettify(node.attr.size),
-                                if node.attr.size == 0 {
-                                    100f64
-                                } else {
-                                    (data.len() as f64) / (node.attr.size as f64)
-                                }
                             );
-                            break;
                         }
-                        None => {
-                            println!("> Error reading from source");
-                            break;
-                        }
+                    }
+                    None => {
+                        println!("> Error reading from source");
                     }
                 }
                 thread::sleep(Duration::from_secs(1));

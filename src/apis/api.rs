@@ -830,6 +830,69 @@ impl WebApi {
             .get_result_json()
             .await
     }
+
+    pub async fn get_all_subscriptions(&self) -> Result<Vec<SubscriptionDto>, NeptisError> {
+        self.get("/subscriptions").await?.get_result_json().await
+    }
+
+    pub async fn get_one_subscription(&self, sid: &str) -> Result<SubscriptionDto, NeptisError> {
+        self.get(format!("/subscriptions/{sid}"))
+            .await?
+            .get_result_json()
+            .await
+    }
+
+    pub async fn put_one_subscription(
+        &self,
+        sid: &str,
+        dto: PutForSubscriptionApi,
+    ) -> Result<SubscriptionDto, NeptisError> {
+        self.put(format!("/subscriptions/{sid}"))
+            .await?
+            .with_body(dto)
+            .get_result_json()
+            .await
+    }
+
+    pub async fn post_one_subscription(
+        &self,
+        dto: PostForSubscriptionApi,
+    ) -> Result<(), NeptisError> {
+        self.post("/subscriptions")
+            .await?
+            .with_body(dto)
+            .get_success()
+            .await
+    }
+
+    pub async fn delete_one_subscription(&self, sid: &str) -> Result<(), NeptisError> {
+        self.delete(format!("/subscriptions/{sid}"))
+            .await?
+            .get_success()
+            .await
+    }
+
+    pub async fn get_all_messages(&self, new_only: bool) -> Result<Vec<Message>, NeptisError> {
+        self.get(format!("/messages?new={new_only}"))
+            .await?
+            .get_result_json()
+            .await
+    }
+
+    pub async fn get_one_message(&self, sid: &str) -> Result<Message, NeptisError> {
+        self.get(format!("/messages/{sid}"))
+            .await?
+            .get_result_json()
+            .await
+    }
+
+    pub async fn send_one_message(&self, dto: PostForMessageApi) -> Result<(), NeptisError> {
+        self.post("/messages")
+            .await?
+            .with_body(dto)
+            .get_success()
+            .await
+    }
 }
 
 impl Default for WebApiConfig {

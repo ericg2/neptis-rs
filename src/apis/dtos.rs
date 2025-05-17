@@ -1,10 +1,16 @@
-use std::str::FromStr;
+use core::fmt;
+use std::{
+    fmt::{Display, Formatter},
+    str::FromStr,
+};
 
 use chrono::{DateTime, Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::ui::manager::ToShortIdString;
+
+use super::NeptisError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AutoJobType {
@@ -425,4 +431,180 @@ pub struct SnapshotSummary {
 
     /// Total duration that the rustic command ran in seconds
     pub total_duration: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PostForSubscriptionApi {
+    pub mode: AlertMode,
+    pub endpoint: String,
+    pub triggers: Vec<AlertTrigger>,
+    pub enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PutForSubscriptionApi {
+    pub mode: Option<AlertMode>,
+    pub endpoint: Option<String>,
+    pub triggers: Option<Vec<AlertTrigger>>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub enum AlertMode {
+    #[default]
+    Discord,
+    Email,
+    Post,
+}
+
+impl ToString for AlertMode {
+    fn to_string(&self) -> String {
+        match self {
+            AlertMode::Discord => "Discord",
+            AlertMode::Email => "Email",
+            AlertMode::Post => "Post",
+        }
+        .into()
+    }
+}
+
+impl FromStr for AlertMode {
+    type Err = NeptisError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "discord" => Ok(AlertMode::Discord),
+            "email" => Ok(AlertMode::Email),
+            "post" => Ok(AlertMode::Post),
+            _ => Err(NeptisError::Str("Failed to convert!".into())),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub enum AlertTrigger {
+    #[default]
+    UserMessage,
+    PointCreated,
+    PointModified,
+    PointDeleted,
+    JobStarted,
+    JobFinished,
+    JobError,
+    ServerShutdown,
+    ServerRestart,
+    AutoJobCreated,
+    AutoJobModified,
+    AutoJobDeleted,
+    SnapshotLocked,
+    SnapshotUnlocked,
+    SnapshotDeleted,
+}
+
+// Display: enables to_string()
+impl Display for AlertTrigger {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            AlertTrigger::UserMessage => "UserMessage",
+            AlertTrigger::PointCreated => "PointCreated",
+            AlertTrigger::PointModified => "PointModified",
+            AlertTrigger::PointDeleted => "PointDeleted",
+            AlertTrigger::JobStarted => "JobStarted",
+            AlertTrigger::JobFinished => "JobFinished",
+            AlertTrigger::JobError => "JobError",
+            AlertTrigger::ServerShutdown => "ServerShutdown",
+            AlertTrigger::ServerRestart => "ServerRestart",
+            AlertTrigger::AutoJobCreated => "AutoJobCreated",
+            AlertTrigger::AutoJobModified => "AutoJobModified",
+            AlertTrigger::AutoJobDeleted => "AutoJobDeleted",
+            AlertTrigger::SnapshotLocked => "SnapshotLocked",
+            AlertTrigger::SnapshotUnlocked => "SnapshotUnlocked",
+            AlertTrigger::SnapshotDeleted => "SnapshotDeleted",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+// FromStr: enables "UserMessage".parse::<AlertTrigger>()
+impl FromStr for AlertTrigger {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "UserMessage" => Ok(AlertTrigger::UserMessage),
+            "PointCreated" => Ok(AlertTrigger::PointCreated),
+            "PointModified" => Ok(AlertTrigger::PointModified),
+            "PointDeleted" => Ok(AlertTrigger::PointDeleted),
+            "JobStarted" => Ok(AlertTrigger::JobStarted),
+            "JobFinished" => Ok(AlertTrigger::JobFinished),
+            "JobError" => Ok(AlertTrigger::JobError),
+            "ServerShutdown" => Ok(AlertTrigger::ServerShutdown),
+            "ServerRestart" => Ok(AlertTrigger::ServerRestart),
+            "AutoJobCreated" => Ok(AlertTrigger::AutoJobCreated),
+            "AutoJobModified" => Ok(AlertTrigger::AutoJobModified),
+            "AutoJobDeleted" => Ok(AlertTrigger::AutoJobDeleted),
+            "SnapshotLocked" => Ok(AlertTrigger::SnapshotLocked),
+            "SnapshotUnlocked" => Ok(AlertTrigger::SnapshotUnlocked),
+            "SnapshotDeleted" => Ok(AlertTrigger::SnapshotDeleted),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct SubscriptionDto {
+    pub id: Uuid,
+    pub mode: AlertMode,
+    pub endpoint: String,
+    pub triggers: Vec<AlertTrigger>,
+    pub enabled: bool,
+}
+
+impl ToShortIdString for SubscriptionDto {
+    fn to_short_id_string(&self) -> String {
+        format!(
+            "{}{} ({}) - {} trigger(s)",
+            if self.enabled { "" } else { "(DISABLED) " },
+            self.mode.to_string(),
+            self.endpoint,
+            self.triggers.len()
+        )
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PostForMessageApi {
+    pub sent_to: Option<String>,
+    pub message: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub id: Uuid,
+    pub sent_from: String,
+    pub sent_to: Option<String>,
+    pub subject: Option<String>,
+    pub message: String,
+    pub sent_date: NaiveDateTime,
+    pub read_by: Vec<String>,
+    pub important: bool,
+}
+
+impl ToShortIdString for Message {
+    fn to_short_id_string(&self) -> String {
+        format!(
+            "{}'{}'\n(by {} at {})",
+            if let Some(ref sub) = self.subject {
+                format!("{} ->\n", sub)
+            } else {
+                "".into()
+            },
+            &self.message,
+            &self.sent_from,
+            &self
+                .sent_date
+                .and_utc()
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %I:%M:%S %p")
+                .to_string()
+        )
+    }
 }
