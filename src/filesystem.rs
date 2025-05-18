@@ -271,7 +271,7 @@ impl NeptisFS {
                     let m_api = &*self.api.read().unwrap();
                     if let Some(api) = m_api {
                         self.rt.block_on(async move {
-                            api.dump_file(path.to_str().unwrap(), Some(offset), Some(size as usize))
+                            api.dump_file(path.to_str().unwrap(), Some(offset), if size >= usize::MAX { None } else { Some(size as usize) })
                                 .await
                                 .ok()
                         })
