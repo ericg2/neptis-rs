@@ -18,21 +18,21 @@ use crate::{
     apis::{NeptisError, api::WebApi},
 };
 
-pub struct ModelProperty<T> {
+pub struct ModelProperty<T, A> {
     name: String,
     is_pk: bool,
-    f_prompt: PromptType<T>,
+    f_prompt: PromptType<T, A>,
     f_get: PropGetType<T>,
     for_create: bool,
     for_update: bool,
     for_linux_only: bool,
 }
 
-impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
+impl<T: Clone + ToShortIdString + Default, A> ModelProperty<T, A> {
     fn _new(
         name: impl Into<String>,
         is_pk: bool,
-        f_prompt: PromptType<T>,
+        f_prompt: PromptType<T, A>,
         f_get: PropGetType<T>,
         for_create: bool,
         for_update: bool,
@@ -52,7 +52,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
     pub fn new(
         name: impl Into<String>,
         is_pk: bool,
-        f_prompt: PromptType<T>,
+        f_prompt: PromptType<T, A>,
         f_get: PropGetType<T>,
     ) -> Self {
         Self::_new(name, is_pk, f_prompt, f_get, true, true, false)
@@ -61,7 +61,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
     pub fn new_for_linux_only(
         name: impl Into<String>,
         is_pk: bool,
-        f_prompt: PromptType<T>,
+        f_prompt: PromptType<T, A>,
         f_get: PropGetType<T>,
     ) -> Self {
         Self::_new(name, is_pk, f_prompt, f_get, true, false, true)
@@ -70,7 +70,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
     pub fn new_for_update_only(
         name: impl Into<String>,
         is_pk: bool,
-        f_prompt: PromptType<T>,
+        f_prompt: PromptType<T, A>,
         f_get: PropGetType<T>,
     ) -> Self {
         Self::_new(name, is_pk, f_prompt, f_get, false, true, false)
@@ -79,7 +79,7 @@ impl<T: Clone + ToShortIdString + Default> ModelProperty<T> {
     pub fn new_for_create_only(
         name: impl Into<String>,
         is_pk: bool,
-        f_prompt: PromptType<T>,
+        f_prompt: PromptType<T, A>,
         f_get: PropGetType<T>,
     ) -> Self {
         Self::_new(name, is_pk, f_prompt, f_get, true, false, false)
@@ -119,7 +119,7 @@ pub enum PromptResult {
     Cancel,
 }
 
-pub type PromptType<T> = fn(&mut T) -> PromptResult;
+pub type PromptType<T, A> = fn(&mut ApiContext<'_, A>, &mut T) -> PromptResult;
 pub type PropGetType<T> = fn(&T) -> String;
 pub type ModifyType<T, A> =
     Box<dyn FnMut(&mut ApiContext<'_, A>, Vec<T>, &T) -> Result<(), NeptisError>>;
@@ -127,7 +127,7 @@ pub type PullType<T, A> = Box<dyn FnMut(&mut ApiContext<'_, A>) -> Result<Vec<T>
 pub type DeleteType<T, A> = Box<dyn FnMut(&mut ApiContext<'_, A>, &T) -> Result<(), NeptisError>>;
 
 pub struct ModelManager<'a, T, A> {
-    properties: Vec<ModelProperty<T>>,
+    properties: Vec<ModelProperty<T, A>>,
     options: Vec<ModelExtraOption<'a, T>>,
     allow_back: bool,
     func_update_item: Option<ModifyType<T, A>>,
@@ -146,7 +146,7 @@ pub struct ModelManager<'a, T, A> {
 impl<'a, T: Clone + ToShortIdString + Default, A> ModelManager<'a, T, A> {
     pub fn new(
         api: Option<&'a A>,
-        properties: Vec<ModelProperty<T>>,
+        properties: Vec<ModelProperty<T, A>>,
         func_pull_items: PullType<T, A>,
     ) -> Self {
         let ctx = ApiContext {
@@ -173,7 +173,7 @@ impl<'a, T: Clone + ToShortIdString + Default, A> ModelManager<'a, T, A> {
     pub fn add(
         mut self,
         name: impl Into<String>,
-        f_prompt: PromptType<T>,
+        f_prompt: PromptType<T, A>,
         f_get: PropGetType<T>,
         is_pk: bool,
         for_create: bool,
@@ -270,7 +270,7 @@ impl<'a, T: Clone + ToShortIdString + Default, A> ModelManager<'a, T, A> {
                     continue; // if updating and not for update
                 }
                 if !prop.is_pk || allow_pk {
-                    if (&mut prop.f_prompt)(&mut use_item) == PromptResult::Cancel {
+                    if (&mut prop.f_prompt)(&mut self.ctx, &mut use_item) == PromptResult::Cancel {
                         cancel = true;
                         break;
                     }

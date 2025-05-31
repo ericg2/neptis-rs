@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::hint::unreachable_unchecked;
+use std::ops::{AddAssign, SubAssign};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -26,6 +27,44 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PointUsage {
+    pub b_data_total: usize,
+    pub b_data_used: usize,
+    pub b_data_avail: usize,
+    pub b_repo_total: usize,
+    pub b_repo_used: usize,
+    pub b_repo_avail: usize,
+}
+
+impl Default for PointUsage {
+    fn default() -> Self {
+        PointUsage { b_data_total: 0, b_data_used: 0, b_data_avail: 0, b_repo_total: 0, b_repo_used: 0, b_repo_avail: 0 }
+    }
+}
+
+impl AddAssign for PointUsage {
+    fn add_assign(&mut self, rhs: Self) {
+        self.b_data_avail += rhs.b_data_avail;
+        self.b_data_total += rhs.b_data_total;
+        self.b_data_used += rhs.b_data_used;
+        self.b_repo_avail += rhs.b_repo_avail;
+        self.b_repo_total += rhs.b_repo_total;
+        self.b_repo_used += rhs.b_repo_used;
+    }
+}
+
+impl SubAssign for PointUsage {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.b_data_avail -= rhs.b_data_avail;
+        self.b_data_total -= rhs.b_data_total;
+        self.b_data_used -= rhs.b_data_used;
+        self.b_repo_avail -= rhs.b_repo_avail;
+        self.b_repo_total -= rhs.b_repo_total;
+        self.b_repo_used -= rhs.b_repo_used;
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct UserDto {
     pub user_name: String,
@@ -34,8 +73,9 @@ pub struct UserDto {
     pub create_date: NaiveDateTime,
     pub is_admin: bool,
     pub is_smb: bool,
-    pub max_data_bytes: Option<i64>,     // depends on privledge
-    pub max_snapshot_bytes: Option<i64>, // depends on privledge
+    pub stats: PointUsage,
+    pub max_data_bytes: usize,
+    pub max_repo_bytes: usize,
 }
 
 impl ToShortIdString for UserDto {
@@ -129,6 +169,16 @@ pub struct TempItem {
     pub kill_temp_c: Option<f32>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct VGStat {
+    pub vg_name: String,
+    pub drive_total: u32,
+    pub lv_total: u32,
+    pub b_allocated: u64,
+    pub b_free: u64,
+    pub b_blk_size: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SystemSnapshotDto {
     pub cpus: Vec<CpuItem>,
@@ -145,6 +195,8 @@ pub struct SystemSnapshotDto {
     pub temperatures: Vec<TempItem>,
     pub smb_connections: Option<usize>,
     pub smb_handles: Option<usize>,
+    pub data_info: VGStat,
+    pub repo_info: VGStat,
 }
 
 impl SystemSnapshotDto {
@@ -169,9 +221,6 @@ impl SystemSnapshotDto {
         );
 
         // Attempt to pull each CPU and their temperature.
-        fn c_to_f(c: f32) -> f32 {
-            (c * 9.0 / 5.0) + 32.0
-        }
         let process_cpu = |cpu: &CpuItem| {
             if let Some(core) = cpu.name.replace("cpu", "").trim().parse::<usize>().ok() {
                 let fmt = vec![format!("core {}", core), format!("core{}", core)];

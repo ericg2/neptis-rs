@@ -465,7 +465,7 @@ impl UiApp {
                     vec![ModelProperty::new(
                         "ID",
                         true,
-                        |_: &mut RepoJobDto| panic!("Not allowed to modify job"),
+                        |_, _: &mut RepoJobDto| panic!("Not allowed to modify job"),
                         |x| x.id.to_string(),
                     )],
                     Box::new({
@@ -586,7 +586,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Task Name",
                             true,
-                            |dto: &mut AutoJobDto| match Text::new("Please enter Task Name")
+                            |_, dto: &mut AutoJobDto| match Text::new("Please enter Task Name")
                                 .with_validator(required!())
                                 .with_initial_value(dto.task_name.as_str())
                                 .prompt_skippable()
@@ -603,7 +603,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Cron Schedule",
                             false,
-                            |dto: &mut AutoJobDto| match Text::new("Please enter Cron Schedule")
+                            |_, dto: &mut AutoJobDto| match Text::new("Please enter Cron Schedule")
                                 .with_validator(required!())
                                 .with_validator(|s: &str| match Schedule::from_str(s) {
                                     Ok(_) => Ok(Validation::Valid),
@@ -626,7 +626,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Enabled",
                             false,
-                            |dto: &mut AutoJobDto| match Confirm::new("Do you want it Enabled")
+                            |_, dto: &mut AutoJobDto| match Confirm::new("Do you want it Enabled")
                                 .with_default(dto.enabled)
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!")
@@ -642,7 +642,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Job Type",
                             false,
-                            |dto: &mut AutoJobDto| match CustomType::<AutoJobType>::new(
+                            |_, dto: &mut AutoJobDto| match CustomType::<AutoJobType>::new(
                                 "Please enter Job Type (Backup/Check)",
                             )
                             .with_starting_input(
@@ -743,7 +743,7 @@ impl UiApp {
             vec![ModelProperty::new(
                 "ID",
                 true,
-                |_: &mut SnapshotFileDto| panic!("Not allowed to modify snapshot"),
+                |_, _: &mut SnapshotFileDto| panic!("Not allowed to modify snapshot"),
                 |x: &SnapshotFileDto| x.id.clone(),
             )],
             Box::new({
@@ -1209,21 +1209,23 @@ impl UiApp {
                         ModelProperty::new(
                             "Name",
                             true,
-                            |dto: &mut InternalMountDto| match Text::new("Please enter Mount Name")
-                                .with_initial_value(dto.name.as_str())
-                                .with_validator(required!())
-                                .with_validator(|m_name: &str| {
-                                    if !regex::Regex::new(r"^[a-z_][a-z0-9_-]*$")
-                                        .expect("Expected regex to work")
-                                        .is_match(m_name)
-                                    {
-                                        Ok(Validation::Invalid("Bad name!".into()))
-                                    } else {
-                                        Ok(Validation::Valid)
-                                    }
-                                })
-                                .prompt_skippable()
-                                .expect("Failed to show prompt!")
+                            |_, dto: &mut InternalMountDto| match Text::new(
+                                "Please enter Mount Name",
+                            )
+                            .with_initial_value(dto.name.as_str())
+                            .with_validator(required!())
+                            .with_validator(|m_name: &str| {
+                                if !regex::Regex::new(r"^[a-z_][a-z0-9_-]*$")
+                                    .expect("Expected regex to work")
+                                    .is_match(m_name)
+                                {
+                                    Ok(Validation::Invalid("Bad name!".into()))
+                                } else {
+                                    Ok(Validation::Valid)
+                                }
+                            })
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!")
                             {
                                 Some(x) => {
                                     dto.name = x;
@@ -1236,28 +1238,57 @@ impl UiApp {
                         ModelProperty::new(
                             "Data Bytes",
                             false,
-                            |dto: &mut InternalMountDto| {
-                                let si = FileSize::from_bytes(dto.data_bytes as u64).to_string();
-                                match CustomType::<FileSize>::new("Please enter maximum data size")
-                                    .with_starting_input(si.as_str())
-                                    .with_validator(|input: &FileSize| {
-                                        if input.get_bytes() < 10000 {
-                                            Ok(Validation::Invalid(
-                                                "You must enter at least 10K bytes!".into(),
-                                            ))
-                                        } else {
-                                            Ok(Validation::Valid)
-                                        }
+                            |ctx, dto: &mut InternalMountDto| {
+                                // Attempt to pull the data interval as set by the server.
+                                match if let Some(api) = ctx.api.as_deref() {
+                                    ctx.rt.block_on(async move {
+                                        let d_info = api.get_info().await.map(|x|x.data_info)?;
+                                        let u_info = api.get_one_user(&api.get_username()).await?;
+
+                                        let b_avail =
+                                        Ok(u64::min(d_info.b_allocated, u_info.b))
                                     })
-                                    .prompt_skippable()
-                                    .expect("Failed to show prompt!")
-                                    .map(|x| x.get_bytes() as i64)
-                                {
-                                    Some(x) => {
-                                        dto.data_bytes = x;
-                                        PromptResult::Ok
+                                } else {
+                                        Err(NeptisError::Str(
+                                            "Failed to pull API. Are you connected?".into(),
+                                        ))
+                                } {
+                                    Ok(b_int) => {
+                                        let si =
+                                            FileSize::from_bytes(dto.data_bytes as u64).to_string();
+                                        match CustomType::<FileSize>::new(
+                                            "Please enter maximum data size",
+                                        )
+                                        .with_starting_input(si.as_str())
+                                        .with_validator(move |input: &FileSize| {
+                                            if input.get_bytes() < 100000 {
+                                                Ok(Validation::Invalid(
+                                                    "You must enter at least 100K bytes!".into(),
+                                                ))
+                                            } else if input.get_bytes() % b_int != 0 {
+                                                Ok(Validation::Invalid(
+                                                    format!(
+                                                        "Your input must be in intervals of {}",
+                                                        FileSize::prettify(b_int)
+                                                    )
+                                                    .into(),
+                                                ))
+                                            } else {
+                                                Ok(Validation::Valid)
+                                            }
+                                        })
+                                        .prompt_skippable()
+                                        .expect("Failed to show prompt!")
+                                        .map(|x| x.get_bytes() as i64)
+                                        {
+                                            Some(x) => {
+                                                dto.data_bytes = x;
+                                                PromptResult::Ok
+                                            }
+                                            None => PromptResult::Cancel,
+                                        }
                                     }
-                                    None => PromptResult::Cancel,
+                                    _ => PromptResult::Cancel,
                                 }
                             },
                             |x| FileSize::from_bytes(x.data_bytes as u64).to_string(),
@@ -1265,28 +1296,53 @@ impl UiApp {
                         ModelProperty::new(
                             "Repo Bytes",
                             false,
-                            |dto: &mut InternalMountDto| {
-                                let si = FileSize::from_bytes(dto.repo_bytes as u64).to_string();
-                                match CustomType::<FileSize>::new("Please enter maximum repo size")
-                                    .with_starting_input(si.as_str())
-                                    .with_validator(|input: &FileSize| {
-                                        if input.get_bytes() < 10000 {
-                                            Ok(Validation::Invalid(
-                                                "You must enter at least 10K bytes!".into(),
-                                            ))
-                                        } else {
-                                            Ok(Validation::Valid)
-                                        }
+                            |ctx, dto: &mut InternalMountDto| {
+                                // Attempt to pull the data interval as set by the server.
+                                match if let Some(api) = ctx.api.as_deref() {
+                                    ctx.rt.block_on(async move {
+                                        api.get_info().await.map(|x| x.repo_info.b_blk_size)
                                     })
-                                    .prompt_skippable()
-                                    .expect("Failed to show prompt!")
-                                    .map(|x| x.get_bytes() as i64)
-                                {
-                                    Some(x) => {
-                                        dto.repo_bytes = x;
-                                        PromptResult::Ok
+                                } else {
+                                    Err(NeptisError::Str(
+                                        "Failed to pull API. Are you connected?".into(),
+                                    ))
+                                } {
+                                    Ok(b_int) => {
+                                        let si =
+                                            FileSize::from_bytes(dto.repo_bytes as u64).to_string();
+                                        match CustomType::<FileSize>::new(
+                                            "Please enter maximum repo size",
+                                        )
+                                        .with_starting_input(si.as_str())
+                                        .with_validator(move |input: &FileSize| {
+                                            if input.get_bytes() < 100000 {
+                                                Ok(Validation::Invalid(
+                                                    "You must enter at least 100K bytes!".into(),
+                                                ))
+                                            } else if input.get_bytes() % b_int != 0 {
+                                                Ok(Validation::Invalid(
+                                                    format!(
+                                                        "Your input must be in intervals of {}",
+                                                        FileSize::prettify(b_int)
+                                                    )
+                                                    .into(),
+                                                ))
+                                            } else {
+                                                Ok(Validation::Valid)
+                                            }
+                                        })
+                                        .prompt_skippable()
+                                        .expect("Failed to show prompt!")
+                                        .map(|x| x.get_bytes() as i64)
+                                        {
+                                            Some(x) => {
+                                                dto.repo_bytes = x;
+                                                PromptResult::Ok
+                                            }
+                                            None => PromptResult::Cancel,
+                                        }
                                     }
-                                    None => PromptResult::Cancel,
+                                    _ => PromptResult::Cancel,
                                 }
                             },
                             |x| FileSize::from_bytes(x.repo_bytes as u64).to_string(),
@@ -1373,7 +1429,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Alert Mode",
                             false,
-                            |dto: &mut SubscriptionDto| match CustomType::<AlertMode>::new(
+                            |_, dto: &mut SubscriptionDto| match CustomType::<AlertMode>::new(
                                 "Please enter the Mode (Discord/Email/Post)",
                             )
                             .with_starting_input(&dto.mode.to_string())
@@ -1391,11 +1447,13 @@ impl UiApp {
                         ModelProperty::new(
                             "Endpoint",
                             false,
-                            |dto: &mut SubscriptionDto| match Text::new("Please enter the endpoint")
-                                .with_initial_value(&dto.endpoint.to_string())
-                                .with_validator(required!())
-                                .prompt_skippable()
-                                .expect("Failed to show prompt!")
+                            |_, dto: &mut SubscriptionDto| match Text::new(
+                                "Please enter the endpoint",
+                            )
+                            .with_initial_value(&dto.endpoint.to_string())
+                            .with_validator(required!())
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!")
                             {
                                 Some(x) => {
                                     dto.endpoint = x;
@@ -1408,7 +1466,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Triggers",
                             false,
-                            |dto: &mut SubscriptionDto| {
+                            |_, dto: &mut SubscriptionDto| {
                                 let opts = vec![
                                     AlertTrigger::UserMessage,
                                     AlertTrigger::PointCreated,
@@ -1470,10 +1528,12 @@ impl UiApp {
                         ModelProperty::new(
                             "Enabled",
                             false,
-                            |dto: &mut SubscriptionDto| match Confirm::new("Do you want it enabled")
-                                .with_default(dto.enabled)
-                                .prompt_skippable()
-                                .expect("Failed to show prompt!")
+                            |_, dto: &mut SubscriptionDto| match Confirm::new(
+                                "Do you want it enabled",
+                            )
+                            .with_default(dto.enabled)
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!")
                             {
                                 Some(x) => {
                                     dto.enabled = x;
@@ -1564,7 +1624,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Username",
                             true,
-                            |user: &mut UserDto| match Text::new("Please enter Username")
+                            |_, user: &mut UserDto| match Text::new("Please enter Username")
                                 .with_initial_value(user.user_name.as_str())
                                 .with_validator(required!())
                                 .with_validator(|m_name: &str| {
@@ -1591,7 +1651,7 @@ impl UiApp {
                         ModelProperty::new(
                             "First Name",
                             false,
-                            |user: &mut UserDto| match Text::new("Please enter First Name")
+                            |_, user: &mut UserDto| match Text::new("Please enter First Name")
                                 .with_initial_value(user.first_name.as_str())
                                 .with_validator(required!())
                                 .prompt_skippable()
@@ -1608,7 +1668,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Last Name",
                             false,
-                            |user: &mut UserDto| match Text::new("Please enter Last Name")
+                            |_, user: &mut UserDto| match Text::new("Please enter Last Name")
                                 .with_initial_value(user.last_name.as_str())
                                 .with_validator(required!())
                                 .prompt_skippable()
@@ -1625,7 +1685,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Is Admin",
                             false,
-                            |user: &mut UserDto| match Confirm::new("Should the user be admin")
+                            |_, user: &mut UserDto| match Confirm::new("Should the user be admin")
                                 .with_default(user.is_admin)
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!")
@@ -1641,7 +1701,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Max Data",
                             false,
-                            |user: &mut UserDto| {
+                            |_, user: &mut UserDto| {
                                 let si =
                                     FileSize::from(user.max_data_bytes.unwrap_or(0)).to_string();
                                 match CustomType::<FileSize>::new("Please enter maximum data size")
@@ -1675,7 +1735,7 @@ impl UiApp {
                         ModelProperty::new(
                             "Max Repo",
                             false,
-                            |user: &mut UserDto| {
+                            |_, user: &mut UserDto| {
                                 let si = FileSize::from(user.max_snapshot_bytes.unwrap_or(0))
                                     .to_string();
                                 match CustomType::<FileSize>::new("Please enter maximum repo size")
@@ -2139,7 +2199,7 @@ impl UiApp {
                         .unwrap_or(false)
                 {
                     let d_path = self.mnt.clone().unwrap_or(format!(
-                        "{}/neptis-mnt",
+                        "{}/.neptis/mnt",
                         dirs_next::home_dir()
                             .expect("Expected home directory!")
                             .to_str()
@@ -2605,7 +2665,7 @@ impl UiApp {
                         .ok_or("Failed to parse secret!".to_string())?,
                 );
             }
-            let mut t_api = WebApi::new(
+            let t_api = WebApi::new(
                 server.server_endpoint.as_str(),
                 p_user.clone(),
                 p_password.clone(),
@@ -2814,7 +2874,7 @@ impl UiApp {
                     ModelProperty::new(
                         "Server Name",
                         true,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Text::new("Please enter Server Name")
                             .with_initial_value(serv.server_name.as_str())
                             .with_validator(required!())
@@ -2832,7 +2892,7 @@ impl UiApp {
                     ModelProperty::new(
                         "Server Endpoint",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Text::new("Enter Server URL")
                             .with_initial_value(serv.server_endpoint.as_str())
                             .with_validator(|input: &str| {
@@ -2863,7 +2923,7 @@ impl UiApp {
                     ModelProperty::new(
                         "Server Password",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Editor::new("Re-type Server Password")
                                 .with_predefined_text(&serv.server_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
@@ -2889,7 +2949,7 @@ impl UiApp {
                     ModelProperty::new(
                         "Default User",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Text::new("Enter Default User")
                                 .with_initial_value(&serv.user_name.clone().unwrap_or("".into()))
                                 .prompt_skippable()
@@ -2910,7 +2970,7 @@ impl UiApp {
                     ModelProperty::new(
                         "Default User Password",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Text::new("Re-type Default User Password")
                                 .with_initial_value(&serv.user_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
@@ -2936,7 +2996,7 @@ impl UiApp {
                     ModelProperty::new(
                         "Arduino Endpoint",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Text::new("Enter Arduino Endpoint")
                                 .with_initial_value(&serv.arduino_endpoint.clone().unwrap_or("".into()))
                                 .prompt_skippable()
@@ -2957,7 +3017,7 @@ impl UiApp {
                     ModelProperty::new(
                         "Arduino Password",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Text::new("Re-type Arduino Password")
                                 .with_initial_value(&serv.arduino_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
@@ -2983,7 +3043,7 @@ impl UiApp {
                     ModelProperty::new_for_linux_only(
                         "Auto Fuse",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Confirm::new("Do you want FUSE to auto-mount")
                                 .with_default(serv.auto_fuse)
                                 .prompt_skippable()
@@ -2997,9 +3057,9 @@ impl UiApp {
                         },
                         |x| x.auto_fuse.to_string()),
                     ModelProperty::new(
-                        "Be Default",
+                        "Set As Default",
                         false,
-                        |serv: &mut ServerItem| {
+                        |_, serv: &mut ServerItem| {
                             match Confirm::new("Do you want the server to be default (will replace others)")
                                 .with_default(serv.is_default)
                                 .prompt_skippable()
@@ -3049,10 +3109,15 @@ impl UiApp {
     }
 
     fn get_db(db_path: Option<String>) -> String {
+        if let Some(b_dir) = dirs_next::home_dir().map(|x| x.join(".neptis")) {
+            if !b_dir.exists() {
+                fs::create_dir_all(b_dir).expect("Failed to create Neptis directory!");
+            }
+        }
         db_path.clone()
             .or(
                 dirs_next::home_dir()
-                    .map(|x|x.join("neptis.db").to_str().unwrap().to_string()))
+                    .map(|x|x.join(".neptis/neptis.db").to_str().unwrap().to_string()))
                     .expect("Failed to find database location! Please set 'NEPTIS_DB' to a path, or use a user account with a home directory.")
     }
 
