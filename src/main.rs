@@ -1150,14 +1150,10 @@ impl UiApp {
                             format!(
                                 "Data Point Allocation: {} / {}\n{}\n\nRepo Point Allocation: {} / {}\n{}",
                                 FileSize::prettify(data_total),
-                                user.max_data_bytes
-                                    .map(|x| FileSize::prettify(x as u64))
-                                    .unwrap_or("N/A".into()),
+                                FileSize::prettify(user.max_data_bytes as u64),
                                 data_breakdown,
                                 FileSize::prettify(repo_total),
-                                user.max_snapshot_bytes
-                                    .map(|x| FileSize::prettify(x as u64))
-                                    .unwrap_or("N/A".into()),
+                                FileSize::prettify(user.max_repo_bytes as u64),
                                 repo_breakdown
                             )
                         } else {
@@ -1170,12 +1166,8 @@ impl UiApp {
                             );
                             format!(
                                 "Data Point Allocation: {d_max} / {}\nData Point File Usage: {d_used} / {d_max}\n\nRepo Point Allocation: {r_max} / {}\nRepo Point File Usage: {r_used} / {r_max}",
-                                user.max_data_bytes
-                                    .map(|x| FileSize::prettify(x as u64))
-                                    .unwrap_or("N/A".into()),
-                                user.max_snapshot_bytes
-                                    .map(|x| FileSize::prettify(x as u64))
-                                    .unwrap_or("N/A".into())
+                                FileSize::prettify(user.max_data_bytes as u64),
+                                FileSize::prettify(user.max_repo_bytes as u64)
                             )
                         }
                     })
@@ -1242,18 +1234,14 @@ impl UiApp {
                                 // Attempt to pull the data interval as set by the server.
                                 match if let Some(api) = ctx.api.as_deref() {
                                     ctx.rt.block_on(async move {
-                                        let d_info = api.get_info().await.map(|x|x.data_info)?;
-                                        let u_info = api.get_one_user(&api.get_username()).await?;
-
-                                        let b_avail =
-                                        Ok(u64::min(d_info.b_allocated, u_info.b))
+                                        Ok((api.get_info().await?.data_info.b_blk_size, api.get_one_user(&api.get_username()).await?.free_data_bytes))
                                     })
                                 } else {
                                         Err(NeptisError::Str(
                                             "Failed to pull API. Are you connected?".into(),
                                         ))
                                 } {
-                                    Ok(b_int) => {
+                                    Ok((b_int, b_max)) => {
                                         let si =
                                             FileSize::from_bytes(dto.data_bytes as u64).to_string();
                                         match CustomType::<FileSize>::new(
@@ -1265,6 +1253,8 @@ impl UiApp {
                                                 Ok(Validation::Invalid(
                                                     "You must enter at least 100K bytes!".into(),
                                                 ))
+                                            } else if input.get_bytes() >= b_max as u64 {
+                                                Ok(Validation::Invalid(format!("You can only allocate up to {}", FileSize::prettify(b_max as u64)).into()))
                                             } else if input.get_bytes() % b_int != 0 {
                                                 Ok(Validation::Invalid(
                                                     format!(
@@ -1300,16 +1290,16 @@ impl UiApp {
                                 // Attempt to pull the data interval as set by the server.
                                 match if let Some(api) = ctx.api.as_deref() {
                                     ctx.rt.block_on(async move {
-                                        api.get_info().await.map(|x| x.repo_info.b_blk_size)
+                                        Ok((api.get_info().await?.repo_info.b_blk_size, api.get_one_user(&api.get_username()).await?.free_repo_bytes))
                                     })
                                 } else {
-                                    Err(NeptisError::Str(
-                                        "Failed to pull API. Are you connected?".into(),
-                                    ))
+                                        Err(NeptisError::Str(
+                                            "Failed to pull API. Are you connected?".into(),
+                                        ))
                                 } {
-                                    Ok(b_int) => {
+                                    Ok((b_int, b_max)) => {
                                         let si =
-                                            FileSize::from_bytes(dto.repo_bytes as u64).to_string();
+                                            FileSize::from_bytes(dto.data_bytes as u64).to_string();
                                         match CustomType::<FileSize>::new(
                                             "Please enter maximum repo size",
                                         )
@@ -1319,6 +1309,8 @@ impl UiApp {
                                                 Ok(Validation::Invalid(
                                                     "You must enter at least 100K bytes!".into(),
                                                 ))
+                                            } else if input.get_bytes() >= b_max as u64 {
+                                                Ok(Validation::Invalid(format!("You can only allocate up to {}", FileSize::prettify(b_max as u64)).into()))
                                             } else if input.get_bytes() % b_int != 0 {
                                                 Ok(Validation::Invalid(
                                                     format!(
@@ -1703,7 +1695,7 @@ impl UiApp {
                             false,
                             |_, user: &mut UserDto| {
                                 let si =
-                                    FileSize::from(user.max_data_bytes.unwrap_or(0)).to_string();
+                                    FileSize::from(user.max_data_bytes as u64).to_string();
                                 match CustomType::<FileSize>::new("Please enter maximum data size")
                                     .with_starting_input(si.as_str())
                                     .with_validator(|input: &FileSize| {
@@ -1717,26 +1709,24 @@ impl UiApp {
                                     })
                                     .prompt_skippable()
                                     .expect("Failed to show prompt!")
-                                    .map(|x| x.get_bytes() as i64)
+                                    .map(|x| x.get_bytes() as usize)
                                 {
                                     Some(x) => {
-                                        user.max_data_bytes = Some(x);
+                                        user.max_data_bytes = x;
                                         PromptResult::Ok
                                     }
                                     None => PromptResult::Cancel,
                                 }
                             },
                             |x| {
-                                x.max_data_bytes
-                                    .map(|x| FileSize::from_bytes(x as u64).to_string())
-                                    .unwrap_or("N/A".into())
-                            },
+                                FileSize::prettify(x.max_data_bytes as u64)
+                            }
                         ),
                         ModelProperty::new(
                             "Max Repo",
                             false,
                             |_, user: &mut UserDto| {
-                                let si = FileSize::from(user.max_snapshot_bytes.unwrap_or(0))
+                                let si = FileSize::from(user.max_repo_bytes as u64)
                                     .to_string();
                                 match CustomType::<FileSize>::new("Please enter maximum repo size")
                                     .with_starting_input(si.as_str())
@@ -1751,19 +1741,17 @@ impl UiApp {
                                     })
                                     .prompt_skippable()
                                     .expect("Failed to show prompt!")
-                                    .map(|x| x.get_bytes() as i64)
+                                    .map(|x| x.get_bytes() as usize)
                                 {
                                     Some(x) => {
-                                        user.max_snapshot_bytes = Some(x);
+                                        user.max_repo_bytes = x;
                                         PromptResult::Ok
                                     }
                                     None => PromptResult::Cancel,
                                 }
                             },
                             |x| {
-                                x.max_snapshot_bytes
-                                    .map(|x| FileSize::from_bytes(x as u64).to_string())
-                                    .unwrap_or("N/A".into())
+                                FileSize::prettify(x.max_repo_bytes as u64)
                             },
                         ),
                     ],
@@ -1802,8 +1790,8 @@ impl UiApp {
                                 first_name: dto.first_name.clone(),
                                 last_name: dto.last_name.clone(),
                                 is_admin: dto.is_admin,
-                                max_data_bytes: dto.max_data_bytes.clone(),
-                                max_snapshot_bytes: dto.max_snapshot_bytes.clone(),
+                                max_data_bytes: dto.max_data_bytes as i64,
+                                max_snapshot_bytes: dto.max_repo_bytes as i64,
                             })
                             .await
                         } else {
@@ -1813,8 +1801,8 @@ impl UiApp {
                                     first_name: Some(dto.first_name.clone()),
                                     last_name: Some(dto.last_name.clone()),
                                     is_admin: Some(dto.is_admin),
-                                    max_data_bytes: dto.max_data_bytes.clone(),
-                                    max_snapshot_bytes: dto.max_snapshot_bytes.clone(),
+                                    max_data_bytes: Some(dto.max_data_bytes as i64),
+                                    max_snapshot_bytes: Some(dto.max_repo_bytes as i64),
                                     password: None, // password will be set seperately
                                 },
                             )

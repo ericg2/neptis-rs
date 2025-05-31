@@ -66,6 +66,7 @@ impl SubAssign for PointUsage {
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
+
 pub struct UserDto {
     pub user_name: String,
     pub first_name: String,
@@ -73,9 +74,11 @@ pub struct UserDto {
     pub create_date: NaiveDateTime,
     pub is_admin: bool,
     pub is_smb: bool,
-    pub stats: PointUsage,
     pub max_data_bytes: usize,
     pub max_repo_bytes: usize,
+    pub free_data_bytes: usize,
+    pub free_repo_bytes: usize,
+    pub all_point_usage: PointUsage,
 }
 
 impl ToShortIdString for UserDto {
@@ -112,8 +115,8 @@ pub struct UserForCreateApi {
     pub first_name: String,
     pub last_name: String,
     pub is_admin: bool,
-    pub max_data_bytes: Option<i64>,
-    pub max_snapshot_bytes: Option<i64>,
+    pub max_data_bytes: i64,
+    pub max_snapshot_bytes: i64,
 }
 
 impl ToShortIdString for UserForCreateApi {
