@@ -356,7 +356,7 @@ impl UiApp {
                                 .unwrap_or("-".to_string())
                         );
                         println!("=================================================\n");
-                        println!("(Waiting... Press any key to select options or exit)\n");
+                        println!("(Waiting... Press any key to select options/exit)\n");
                     }
                     Err(e) => {
                         println!("Failed to show job information: {:?}", e);
@@ -857,17 +857,19 @@ impl UiApp {
             }
 
             let opt = match mode {
-                JobType::Backup => Confirm::new("Do you want to lock the snapshot")
+                JobType::Backup => Confirm::new("Do you want to lock the snapshot?")
+                    .with_default(false)
                     .prompt_skippable()
                     .expect("Failed to show prompt!"),
-                JobType::Restore => Confirm::new("Do you want to overwrite data")
+                JobType::Restore => Confirm::new("Do you want to overwrite data?")
                     .prompt_skippable()
                     .expect("Failed to show prompt!"),
                 _ => Some(false),
             };
 
             if let Some(opt) = opt {
-                if Confirm::new("Do you want to proceed")
+                if Confirm::new("Do you want to proceed?")
+                    .with_default(true)
                     .prompt_skippable()
                     .expect("Failed to show prompt!")
                     .unwrap_or(false)
