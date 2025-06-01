@@ -945,13 +945,13 @@ impl UiApp {
             (stats, smb.unwrap_or(false))
         } {
             (Some(stats), smb) => {
-                let d_total = stats.data_max_bytes;
-                let d_used = stats.data_used_bytes;
-                let d_free = d_used.map(|x| d_total - x);
+                let d_total = stats.usage.b_data_total;
+                let d_used = stats.usage.b_data_used;
+                let d_free = d_total - d_used;
 
-                let r_total = stats.repo_max_bytes;
-                let r_used = stats.repo_used_bytes;
-                let r_free = r_used.map(|x| r_total - x);
+                let r_total = stats.usage.b_repo_total;
+                let r_used = stats.usage.b_repo_used;
+                let r_free = r_total - r_used;
 
                 fn prettify_bytes(
                     b_total: i64,
@@ -1004,8 +1004,8 @@ impl UiApp {
                         .to_string()
                 );
                 println!();
-                println!("Data Usage: {}", prettify_bytes(d_total, d_used, d_free));
-                println!("Repo Usage: {}", prettify_bytes(r_total, r_used, r_free));
+                println!("Data Usage: {}", prettify_bytes(d_total as i64, Some(d_used as i64), Some(d_free as i64)));
+                println!("Repo Usage: {}", prettify_bytes(r_total as i64, Some(r_used as i64), Some(r_free as i64)));
             }
             _ => println!("> FAILED to display additional statistics"),
         }
@@ -1119,22 +1119,22 @@ impl UiApp {
                             let mut data_points: Vec<(String, u64, u64)> = mounts.iter()
                                 .map(|y| (
                                     y.name.clone(),
-                                    y.data_used_bytes.unwrap_or(0) as u64,
-                                    y.data_max_bytes as u64
+                                    y.usage.b_data_used as u64,
+                                    y.usage.b_data_total as u64
                                 ))
                                 .collect();
                             let mut repo_points: Vec<(String, u64, u64)> = mounts.iter()
                                 .map(|y| (
                                     y.name.clone(),
-                                    y.repo_used_bytes.unwrap_or(0) as u64,
-                                    y.repo_max_bytes as u64
+                                    y.usage.b_repo_used as u64,
+                                    y.usage.b_repo_total as u64
                                 ))
                                 .collect();
                             // Sort by total (used bytes) descending
                             data_points.sort_by(|a, b| b.1.cmp(&a.1));
                             repo_points.sort_by(|a, b| b.1.cmp(&a.1));
-                            let data_total = mounts.iter().map(|y| y.data_max_bytes).sum::<i64>() as u64;
-                            let repo_total = mounts.iter().map(|y| y.repo_max_bytes).sum::<i64>() as u64;
+                            let data_total = mounts.iter().map(|y| y.usage.b_data_total as i64).sum::<i64>() as u64;
+                            let repo_total = mounts.iter().map(|y| y.usage.b_repo_total as i64).sum::<i64>() as u64;
                             let data_breakdown = data_points.iter()
                                 .map(|(name, used, max)| {
                                     format!("  • {}: {} / {}", name, FileSize::prettify(*used), FileSize::prettify(*max))
@@ -1159,10 +1159,10 @@ impl UiApp {
                         } else {
                             // Original behavior
                             let (d_max, r_max, d_used, r_used) = (
-                                FileSize::prettify(mounts.iter().map(|y| y.data_max_bytes).sum::<i64>() as u64),
-                                FileSize::prettify(mounts.iter().map(|y| y.repo_max_bytes).sum::<i64>() as u64),
-                                FileSize::prettify(mounts.iter().map(|y| y.data_used_bytes.unwrap_or(0)).sum::<i64>() as u64),
-                                FileSize::prettify(mounts.iter().map(|y| y.repo_used_bytes.unwrap_or(0)).sum::<i64>() as u64),
+                                FileSize::prettify(mounts.iter().map(|y| y.usage.b_data_total as i64).sum::<i64>() as u64),
+                                FileSize::prettify(mounts.iter().map(|y| y.usage.b_repo_total as i64).sum::<i64>() as u64),
+                                FileSize::prettify(mounts.iter().map(|y| y.usage.b_data_used as i64).sum::<i64>() as u64),
+                                FileSize::prettify(mounts.iter().map(|y| y.usage.b_repo_used as i64).sum::<i64>() as u64),
                             );
                             format!(
                                 "Data Point Allocation: {d_max} / {}\nData Point File Usage: {d_used} / {d_max}\n\nRepo Point Allocation: {r_max} / {}\nRepo Point File Usage: {r_used} / {r_max}",
@@ -1234,12 +1234,17 @@ impl UiApp {
                                 // Attempt to pull the data interval as set by the server.
                                 match if let Some(api) = ctx.api.as_deref() {
                                     ctx.rt.block_on(async move {
-                                        Ok((api.get_info().await?.data_info.b_blk_size, api.get_one_user(&api.get_username()).await?.free_data_bytes))
+                                        Ok((
+                                            api.get_info().await?.data_info.b_blk_size,
+                                            api.get_one_user(&api.get_username())
+                                                .await?
+                                                .free_data_bytes,
+                                        ))
                                     })
                                 } else {
-                                        Err(NeptisError::Str(
-                                            "Failed to pull API. Are you connected?".into(),
-                                        ))
+                                    Err(NeptisError::Str(
+                                        "Failed to pull API. Are you connected?".into(),
+                                    ))
                                 } {
                                     Ok((b_int, b_max)) => {
                                         let si =
@@ -1254,7 +1259,13 @@ impl UiApp {
                                                     "You must enter at least 100K bytes!".into(),
                                                 ))
                                             } else if input.get_bytes() >= b_max as u64 {
-                                                Ok(Validation::Invalid(format!("You can only allocate up to {}", FileSize::prettify(b_max as u64)).into()))
+                                                Ok(Validation::Invalid(
+                                                    format!(
+                                                        "You can only allocate up to {}",
+                                                        FileSize::prettify(b_max as u64)
+                                                    )
+                                                    .into(),
+                                                ))
                                             } else if input.get_bytes() % b_int != 0 {
                                                 Ok(Validation::Invalid(
                                                     format!(
@@ -1290,12 +1301,17 @@ impl UiApp {
                                 // Attempt to pull the data interval as set by the server.
                                 match if let Some(api) = ctx.api.as_deref() {
                                     ctx.rt.block_on(async move {
-                                        Ok((api.get_info().await?.repo_info.b_blk_size, api.get_one_user(&api.get_username()).await?.free_repo_bytes))
+                                        Ok((
+                                            api.get_info().await?.repo_info.b_blk_size,
+                                            api.get_one_user(&api.get_username())
+                                                .await?
+                                                .free_repo_bytes,
+                                        ))
                                     })
                                 } else {
-                                        Err(NeptisError::Str(
-                                            "Failed to pull API. Are you connected?".into(),
-                                        ))
+                                    Err(NeptisError::Str(
+                                        "Failed to pull API. Are you connected?".into(),
+                                    ))
                                 } {
                                     Ok((b_int, b_max)) => {
                                         let si =
@@ -1310,7 +1326,13 @@ impl UiApp {
                                                     "You must enter at least 100K bytes!".into(),
                                                 ))
                                             } else if input.get_bytes() >= b_max as u64 {
-                                                Ok(Validation::Invalid(format!("You can only allocate up to {}", FileSize::prettify(b_max as u64)).into()))
+                                                Ok(Validation::Invalid(
+                                                    format!(
+                                                        "You can only allocate up to {}",
+                                                        FileSize::prettify(b_max as u64)
+                                                    )
+                                                    .into(),
+                                                ))
                                             } else if input.get_bytes() % b_int != 0 {
                                                 Ok(Validation::Invalid(
                                                     format!(
@@ -1350,8 +1372,8 @@ impl UiApp {
                                 y.into_iter()
                                     .map(|x| InternalMountDto {
                                         name: x.name.clone(),
-                                        data_bytes: x.data_max_bytes,
-                                        repo_bytes: x.repo_max_bytes,
+                                        data_bytes: x.usage.b_data_total as i64,
+                                        repo_bytes: x.usage.b_repo_total as i64,
                                     })
                                     .collect::<Vec<_>>()
                             })
@@ -1694,8 +1716,7 @@ impl UiApp {
                             "Max Data",
                             false,
                             |_, user: &mut UserDto| {
-                                let si =
-                                    FileSize::from(user.max_data_bytes as u64).to_string();
+                                let si = FileSize::from(user.max_data_bytes as u64).to_string();
                                 match CustomType::<FileSize>::new("Please enter maximum data size")
                                     .with_starting_input(si.as_str())
                                     .with_validator(|input: &FileSize| {
@@ -1718,16 +1739,13 @@ impl UiApp {
                                     None => PromptResult::Cancel,
                                 }
                             },
-                            |x| {
-                                FileSize::prettify(x.max_data_bytes as u64)
-                            }
+                            |x| FileSize::prettify(x.max_data_bytes as u64),
                         ),
                         ModelProperty::new(
                             "Max Repo",
                             false,
                             |_, user: &mut UserDto| {
-                                let si = FileSize::from(user.max_repo_bytes as u64)
-                                    .to_string();
+                                let si = FileSize::from(user.max_repo_bytes as u64).to_string();
                                 match CustomType::<FileSize>::new("Please enter maximum repo size")
                                     .with_starting_input(si.as_str())
                                     .with_validator(|input: &FileSize| {
@@ -1750,9 +1768,7 @@ impl UiApp {
                                     None => PromptResult::Cancel,
                                 }
                             },
-                            |x| {
-                                FileSize::prettify(x.max_repo_bytes as u64)
-                            },
+                            |x| FileSize::prettify(x.max_repo_bytes as u64),
                         ),
                     ],
                     Box::new(|ctx| {
@@ -2661,8 +2677,7 @@ impl UiApp {
             );
             self.rt
                 .block_on(async { t_api.get_info().await })
-                .ok()
-                .ok_or("Failed to load server")?;
+                .map_err(|e| format!("Failed to load server: {e}"))?;
             Ok(t_api)
         };
 

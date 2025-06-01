@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::ui::manager::ToShortIdString;
 
-use super::NeptisError;
+use super::{api::PointUsage, NeptisError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AutoJobType {
@@ -118,18 +118,15 @@ impl FromStr for JobStatus {
 }
 
 #[derive(Serialize, Deserialize)]
+
 pub struct MountDto {
     pub name: String,
     pub owned_by: String,
-    pub data_max_bytes: i64,
-    pub repo_max_bytes: i64,
-    pub data_used_bytes: Option<i64>,
-    pub repo_used_bytes: Option<i64>,
+    pub usage: PointUsage,
     pub date_created: NaiveDateTime,
     pub data_accessed: NaiveDateTime,
     pub repo_accessed: NaiveDateTime,
 }
-
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct RepoJobDto {
     pub id: Uuid,

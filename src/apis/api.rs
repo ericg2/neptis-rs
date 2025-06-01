@@ -24,7 +24,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{NaiveDateTime, Utc};
 use reqwest::{Body, Client, IntoUrl, Method, Response};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::RwLock;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -39,7 +39,14 @@ pub struct PointUsage {
 
 impl Default for PointUsage {
     fn default() -> Self {
-        PointUsage { b_data_total: 0, b_data_used: 0, b_data_avail: 0, b_repo_total: 0, b_repo_used: 0, b_repo_avail: 0 }
+        PointUsage {
+            b_data_total: 0,
+            b_data_used: 0,
+            b_data_avail: 0,
+            b_repo_total: 0,
+            b_repo_used: 0,
+            b_repo_avail: 0,
+        }
     }
 }
 
@@ -172,8 +179,8 @@ pub struct TempItem {
     pub kill_temp_c: Option<f32>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct VGStat {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VGStatDto {
     pub vg_name: String,
     pub drive_total: u32,
     pub lv_total: u32,
@@ -184,6 +191,7 @@ pub struct VGStat {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SystemSnapshotDto {
+    pub api_version: String,
     pub cpus: Vec<CpuItem>,
     pub timestamp: NaiveDateTime,
     pub os_name: Option<String>,
@@ -198,8 +206,8 @@ pub struct SystemSnapshotDto {
     pub temperatures: Vec<TempItem>,
     pub smb_connections: Option<usize>,
     pub smb_handles: Option<usize>,
-    pub data_info: VGStat,
-    pub repo_info: VGStat,
+    pub data_info: VGStatDto,
+    pub repo_info: VGStatDto,
 }
 
 impl SystemSnapshotDto {
