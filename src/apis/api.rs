@@ -633,7 +633,7 @@ impl WebApi {
         &self,
         name: &str,
         dto: PutForMountApi,
-    ) -> Result<MountDto, NeptisError> {
+    ) -> Result<RepoJobDto, NeptisError> {
         self.put(format!("/mounts/id/{}", name))
             .await?
             .with_body(dto)
@@ -761,10 +761,10 @@ impl WebApi {
             .await
     }
 
-    pub async fn delete_one_mount(&self, name: &str) -> Result<(), NeptisError> {
+    pub async fn delete_one_mount(&self, name: &str) -> Result<RepoJobDto, NeptisError> {
         self.delete(format!("/mounts/id/{}", name))
             .await?
-            .get_success()
+            .get_result_json()
             .await
     }
 

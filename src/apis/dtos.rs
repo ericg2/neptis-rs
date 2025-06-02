@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::ui::manager::ToShortIdString;
 
-use super::{api::PointUsage, NeptisError};
+use super::{NeptisError, api::PointUsage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AutoJobType {

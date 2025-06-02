@@ -1006,8 +1006,14 @@ impl UiApp {
                         .to_string()
                 );
                 println!();
-                println!("Data Usage: {}", prettify_bytes(d_total as i64, Some(d_used as i64), Some(d_free as i64)));
-                println!("Repo Usage: {}", prettify_bytes(r_total as i64, Some(r_used as i64), Some(r_free as i64)));
+                println!(
+                    "Data Usage: {}",
+                    prettify_bytes(d_total as i64, Some(d_used as i64), Some(d_free as i64))
+                );
+                println!(
+                    "Repo Usage: {}",
+                    prettify_bytes(r_total as i64, Some(r_used as i64), Some(r_free as i64))
+                );
             }
             _ => println!("> FAILED to display additional statistics"),
         }
@@ -1187,6 +1193,34 @@ impl UiApp {
         } else {
             ("Failed to calculate User Information".into(), false)
         }
+    }
+
+    async fn _ensure_job_good(api: &WebApi, mount: &str, id: Uuid) -> Result<(), NeptisError> {
+        println!(
+            "**** Sent request. Server responded with Job #{:.6}...",
+            &id.to_string()
+        );
+        thread::sleep(Duration::from_secs(2));
+        for i in 0..10 {
+            let job = api
+                .get_all_jobs_for_mount(mount)
+                .await?
+                .into_iter()
+                .find(|x| x.id == id)
+                .ok_or(NeptisError::Str("Requested job does not exist!".into()))?;
+            if job.job_status == JobStatus::Successful {
+                println!("> Operation successful!");
+                return Ok(());
+            } else if job.job_status == JobStatus::Failed {
+                println!("> Operation failed. Error(s):\n{}", job.errors.join("\n"));
+                return Err(NeptisError::Str("Operation failed".into()));
+            } else {
+                println!("> Waiting for job to finish... ({i}/10) tries");
+            }
+            thread::sleep(Duration::from_secs(2));
+        }
+        println!("> Operation timed out without response.");
+        Err(NeptisError::Str("Operation failed".into()))
     }
 
     // inspected
@@ -1390,26 +1424,28 @@ impl UiApp {
                         .api
                         .as_deref()
                         .ok_or(NeptisError::Str("API is not valid!".into()))?;
-                    ctx.rt
-                        .block_on(async move { api.delete_one_mount(dto.name.as_str()).await })
+                    ctx.rt.block_on(async move {
+                        let ret = api.delete_one_mount(dto.name.as_str()).await?;
+                        Self::_ensure_job_good(api, dto.name.as_str(), ret.id).await
+                    })
                 }))
                 .with_modify(Box::new(|ctx, _, dto| {
                     let api = ctx
                         .api
                         .as_deref()
                         .ok_or(NeptisError::Str("API is not valid!".into()))?;
-                    ctx.rt
-                        .block_on(async move {
-                            api.put_one_mount(
+                    ctx.rt.block_on(async move {
+                        let ret = api
+                            .put_one_mount(
                                 dto.name.as_str(),
                                 PutForMountApi {
                                     data_bytes: dto.data_bytes,
                                     repo_bytes: dto.repo_bytes,
                                 },
                             )
-                            .await
-                        })
-                        .map(|_| ())
+                            .await?;
+                        Self::_ensure_job_good(api, dto.name.as_str(), ret.id).await
+                    })
                 }))
                 .do_display()
             } else {
