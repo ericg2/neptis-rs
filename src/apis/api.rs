@@ -23,9 +23,13 @@ use base64::engine::Config;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{NaiveDateTime, Utc};
 use reqwest::{Body, Client, IntoUrl, Method, Response};
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_retry::RetryTransientMiddleware;
+use reqwest_retry::policies::ExponentialBackoff;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PointUsage {
@@ -299,7 +303,7 @@ pub struct AuthOutputDto {
 
 pub struct WebApiConfig {
     pub base_url: String,
-    pub client: Client,
+    pub client: ClientWithMiddleware,
     pub secret: Option<RollingSecret>,
     pub user_agent: Option<String>,
     pub auth: RwLock<Option<AuthOutputDto>>,
@@ -545,15 +549,15 @@ impl WebApi {
         password: impl Into<String>,
         secret: Option<RollingSecret>,
     ) -> WebApi {
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
         WebApi {
             user_name: user_name.into(),
             password: password.into(),
             config: WebApiConfig {
                 base_url: base_path.into(),
-                client: Client::builder()
-                    .timeout(Duration::from_secs(3))
-                    .build()
-                    .unwrap(),
+                client: ClientBuilder::new(Client::new())
+                    .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+                    .build(),
                 secret,
                 user_agent: None,
                 auth: RwLock::new(None),
@@ -715,6 +719,13 @@ impl WebApi {
         o: Option<usize>,
     ) -> Result<Vec<RepoJobDto>, NeptisError> {
         self.get(format!("/mounts/jobs?n={}&o={}", n, o.unwrap_or(0)))
+            .await?
+            .get_result_json()
+            .await
+    }
+
+    pub async fn get_one_job(&self, id: Uuid) -> Result<RepoJobDto, NeptisError> {
+        self.get(format!("/mounts/jobs/{}", id.to_string()))
             .await?
             .get_result_json()
             .await
@@ -957,10 +968,13 @@ impl WebApi {
 
 impl Default for WebApiConfig {
     fn default() -> Self {
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
         WebApiConfig {
             base_url: "http://localhost".to_owned(),
             user_agent: Some("OpenAPI-Generator/v1/rust".to_owned()),
-            client: Client::new(),
+            client: ClientBuilder::new(Client::new())
+                .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+                .build(),
             secret: None,
             auth: RwLock::new(None),
         }

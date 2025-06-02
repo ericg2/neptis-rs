@@ -3,7 +3,8 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum NeptisError {
-    Api(reqwest::Error),
+    ApiRegular(reqwest::Error),
+    Api(reqwest_middleware::Error),
     Serde(serde_json::Error),
     Io(std::io::Error),
     Sql(sqlx::Error),
@@ -13,7 +14,8 @@ pub enum NeptisError {
 impl fmt::Display for NeptisError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (module, e) = match self {
-            NeptisError::Api(e) => ("reqwest", e.to_string()),
+            NeptisError::ApiRegular(e) => ("reqwest", e.to_string()),
+            NeptisError::Api(e) => ("reqwest-middle", e.to_string()),
             NeptisError::Serde(e) => ("serde", e.to_string()),
             NeptisError::Io(e) => ("IO", e.to_string()),
             NeptisError::Str(e) => ("custom", e.to_string()),
@@ -26,6 +28,7 @@ impl fmt::Display for NeptisError {
 impl error::Error for NeptisError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         Some(match self {
+            NeptisError::ApiRegular(e) => e,
             NeptisError::Api(e) => e,
             NeptisError::Serde(e) => e,
             NeptisError::Io(e) => e,
@@ -37,6 +40,12 @@ impl error::Error for NeptisError {
 
 impl From<reqwest::Error> for NeptisError {
     fn from(e: reqwest::Error) -> Self {
+        NeptisError::ApiRegular(e)
+    }
+}
+
+impl From<reqwest_middleware::Error> for NeptisError {
+    fn from(e: reqwest_middleware::Error) -> Self {
         NeptisError::Api(e)
     }
 }

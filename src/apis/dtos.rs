@@ -50,6 +50,8 @@ pub enum JobType {
     Restore,
     Check,
     Prune,
+    PointAdjust,
+    PointDelete,
 }
 
 impl ToString for JobType {
@@ -60,6 +62,8 @@ impl ToString for JobType {
             JobType::Check => "Check",
             JobType::Restore => "Restore",
             JobType::Prune => "Prune",
+            JobType::PointAdjust => "PointAdjust",
+            JobType::PointDelete => "PointDelete",
         }
         .into()
     }
@@ -74,6 +78,8 @@ impl FromStr for JobType {
             "restore" => Ok(JobType::Restore),
             "check" => Ok(JobType::Check),
             "prune" => Ok(JobType::Prune),
+            "pointadjust" => Ok(JobType::PointAdjust),
+            "pointdelete" => Ok(JobType::PointDelete),
             _ => Err(()),
         }
     }

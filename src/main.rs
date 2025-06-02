@@ -1195,24 +1195,21 @@ impl UiApp {
         }
     }
 
-    async fn _ensure_job_good(api: &WebApi, mount: &str, id: Uuid) -> Result<(), NeptisError> {
+    async fn _ensure_job_good(api: &WebApi, id: Uuid) -> Result<(), NeptisError> {
         println!(
             "**** Sent request. Server responded with Job #{:.6}...",
             &id.to_string()
         );
         thread::sleep(Duration::from_secs(2));
         for i in 0..10 {
-            let job = api
-                .get_all_jobs_for_mount(mount)
-                .await?
-                .into_iter()
-                .find(|x| x.id == id)
-                .ok_or(NeptisError::Str("Requested job does not exist!".into()))?;
+            let job = api.get_one_job(id).await?;
             if job.job_status == JobStatus::Successful {
                 println!("> Operation successful!");
+                thread::sleep(Duration::from_secs(1));
                 return Ok(());
             } else if job.job_status == JobStatus::Failed {
                 println!("> Operation failed. Error(s):\n{}", job.errors.join("\n"));
+                thread::sleep(Duration::from_secs(2));
                 return Err(NeptisError::Str("Operation failed".into()));
             } else {
                 println!("> Waiting for job to finish... ({i}/10) tries");
@@ -1220,6 +1217,7 @@ impl UiApp {
             thread::sleep(Duration::from_secs(2));
         }
         println!("> Operation timed out without response.");
+        thread::sleep(Duration::from_secs(1));
         Err(NeptisError::Str("Operation failed".into()))
     }
 
@@ -1282,7 +1280,7 @@ impl UiApp {
                                         "Failed to pull API. Are you connected?".into(),
                                     ))
                                 } {
-                                    Ok((b_int, b_max)) => {
+                                    Ok((b_int, _b_max)) => {
                                         let si =
                                             FileSize::from_bytes(dto.data_bytes as u64).to_string();
                                         match CustomType::<FileSize>::new(
@@ -1293,14 +1291,6 @@ impl UiApp {
                                             if input.get_bytes() < 100000 {
                                                 Ok(Validation::Invalid(
                                                     "You must enter at least 100K bytes!".into(),
-                                                ))
-                                            } else if input.get_bytes() >= b_max as u64 {
-                                                Ok(Validation::Invalid(
-                                                    format!(
-                                                        "You can only allocate up to {}",
-                                                        FileSize::prettify(b_max as u64)
-                                                    )
-                                                    .into(),
                                                 ))
                                             } else if input.get_bytes() % b_int != 0 {
                                                 Ok(Validation::Invalid(
@@ -1349,7 +1339,7 @@ impl UiApp {
                                         "Failed to pull API. Are you connected?".into(),
                                     ))
                                 } {
-                                    Ok((b_int, b_max)) => {
+                                    Ok((b_int, _b_max)) => {
                                         let si =
                                             FileSize::from_bytes(dto.data_bytes as u64).to_string();
                                         match CustomType::<FileSize>::new(
@@ -1360,14 +1350,6 @@ impl UiApp {
                                             if input.get_bytes() < 100000 {
                                                 Ok(Validation::Invalid(
                                                     "You must enter at least 100K bytes!".into(),
-                                                ))
-                                            } else if input.get_bytes() >= b_max as u64 {
-                                                Ok(Validation::Invalid(
-                                                    format!(
-                                                        "You can only allocate up to {}",
-                                                        FileSize::prettify(b_max as u64)
-                                                    )
-                                                    .into(),
                                                 ))
                                             } else if input.get_bytes() % b_int != 0 {
                                                 Ok(Validation::Invalid(
@@ -1426,7 +1408,7 @@ impl UiApp {
                         .ok_or(NeptisError::Str("API is not valid!".into()))?;
                     ctx.rt.block_on(async move {
                         let ret = api.delete_one_mount(dto.name.as_str()).await?;
-                        Self::_ensure_job_good(api, dto.name.as_str(), ret.id).await
+                        Self::_ensure_job_good(api, ret.id).await
                     })
                 }))
                 .with_modify(Box::new(|ctx, _, dto| {
@@ -1444,7 +1426,7 @@ impl UiApp {
                                 },
                             )
                             .await?;
-                        Self::_ensure_job_good(api, dto.name.as_str(), ret.id).await
+                        Self::_ensure_job_good(api, ret.id).await
                     })
                 }))
                 .do_display()
