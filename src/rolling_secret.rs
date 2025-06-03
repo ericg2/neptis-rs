@@ -13,6 +13,8 @@ use sha2::Digest;
 use sha2::{Sha256, Sha512};
 use std::convert::TryInto;
 use std::str::Chars;
+use std::thread;
+use std::time::Duration;
 use std::vec::Vec;
 use totp_rs::Algorithm::SHA512;
 use totp_rs::{Secret, TOTP};
@@ -94,9 +96,20 @@ impl RollingSecret {
 
     pub fn rolling_key(&self) -> Option<Vec<u8>> {
         let now = Utc::now().timestamp() as u64;
-        let otp1 = self.otp_a.generate(now).parse::<i64>().ok()?;
-        let otp2 = self.otp_b.generate(now).parse::<i64>().ok()?;
+
+        // Assume 60-second step
+        let time_until_next_roll = 60 - (now % 60);
+
+        // If we're within 3 seconds of the next step, wait
+        if time_until_next_roll <= 3 {
+            thread::sleep(Duration::from_secs(time_until_next_roll));
+        }
+
+        let new_now = Utc::now().timestamp() as u64;
+        let otp1 = self.otp_a.generate(new_now).parse::<i64>().ok()?;
+        let otp2 = self.otp_b.generate(new_now).parse::<i64>().ok()?;
         let otp = otp1 as u64 * otp2 as u64;
+
         let password = self.scramble_password(&self.aes_password, otp)?;
         Some(Sha256::digest(password.as_bytes()).to_vec())
     }
