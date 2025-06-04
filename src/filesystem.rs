@@ -274,7 +274,7 @@ impl NeptisFS {
                             api.dump_file(
                                 path.to_str().unwrap(),
                                 Some(offset),
-                                if size >= usize::MAX {
+                                if size == usize::MAX {
                                     None
                                 } else {
                                     Some(size as usize)

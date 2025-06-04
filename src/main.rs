@@ -2866,27 +2866,29 @@ impl UiApp {
         }
 
         // Check if a default server is set.
-        if let Some(d_item) = self
-            .db
-            .get_all_servers_sync()
-            .map(|x| x.into_iter().find(|x| x.is_default))
-            .expect("Failed to pull from database")
-        {
-            let mut do_auto = true;
-            println!(
-                "Connecting to {} ({}) in 2 seconds...",
-                d_item.server_name.as_str(),
-                d_item.server_endpoint.as_str()
-            );
-            enable_raw_mode().expect("Failed to enable raw mode");
-            if event::poll(Duration::from_secs(2)).expect("Polling failed") {
-                if let Event::Key(_) = event::read().expect("Failed to read event") {
-                    do_auto = false;
+        if cfg!(not(debug_assertions)) {
+            if let Some(d_item) = self
+                .db
+                .get_all_servers_sync()
+                .map(|x| x.into_iter().find(|x| x.is_default))
+                .expect("Failed to pull from database")
+            {
+                let mut do_auto = true;
+                println!(
+                    "Connecting to {} ({}) in 2 seconds...",
+                    d_item.server_name.as_str(),
+                    d_item.server_endpoint.as_str()
+                );
+                enable_raw_mode().expect("Failed to enable raw mode");
+                if event::poll(Duration::from_secs(2)).expect("Polling failed") {
+                    if let Event::Key(_) = event::read().expect("Failed to read event") {
+                        do_auto = false;
+                    }
                 }
-            }
-            disable_raw_mode().expect("Failed to disable raw mode");
-            if do_auto {
-                self.show_connect(d_item, true);
+                disable_raw_mode().expect("Failed to disable raw mode");
+                if do_auto {
+                    self.show_connect(d_item, true);
+                }
             }
         }
 
