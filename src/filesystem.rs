@@ -257,7 +257,9 @@ impl NeptisFS {
             }
         }?;
         for x in ret {
-            output.push(x);
+            if x.path.to_str().unwrap() != "" {
+                output.push(x);
+            }
         }
 
         Some(output)

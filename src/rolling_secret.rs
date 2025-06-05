@@ -100,9 +100,9 @@ impl RollingSecret {
         // Assume 60-second step
         let time_until_next_roll = 60 - (now % 60);
 
-        // If we're within 3 seconds of the next step, wait
-        if time_until_next_roll <= 3 {
-            thread::sleep(Duration::from_secs(time_until_next_roll));
+        // If we're within 1 seconds of the next step, wait
+        if time_until_next_roll <= 1 {
+            thread::sleep(Duration::from_secs(time_until_next_roll+1));
         }
 
         let new_now = Utc::now().timestamp() as u64;
@@ -110,7 +110,7 @@ impl RollingSecret {
         let otp2 = self.otp_b.generate(new_now).parse::<i64>().ok()?;
         let otp = otp1 as u64 * otp2 as u64;
 
-        let password = self.scramble_password(&self.aes_password, otp)?;
+        let password: String = self.scramble_password(&self.aes_password, otp)?;
         Some(Sha256::digest(password.as_bytes()).to_vec())
     }
 
