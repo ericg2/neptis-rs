@@ -23,8 +23,7 @@ use crate::{
         api::WebApi,
         dtos::{NodeDto, PostForFileApi, PutForFileApi},
     },
-    from_dto_time, to_dto_time,
-    ui::file_size::FileSize,
+    from_dto_time, to_dto_time
 };
 
 pub struct NeptisFS {

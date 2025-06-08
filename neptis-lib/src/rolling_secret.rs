@@ -102,7 +102,7 @@ impl RollingSecret {
 
         // If we're within 1 seconds of the next step, wait
         if time_until_next_roll <= 1 {
-            thread::sleep(Duration::from_secs(time_until_next_roll+1));
+            thread::sleep(Duration::from_secs(time_until_next_roll + 1));
         }
 
         let new_now = Utc::now().timestamp() as u64;

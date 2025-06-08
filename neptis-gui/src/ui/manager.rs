@@ -14,9 +14,9 @@ use inquire::{
 use tokio::runtime::Runtime;
 
 use crate::{
-    UiApp,
-    apis::{NeptisError, api::WebApi},
-};
+    UiApp};
+
+use neptis_lib::prelude::*;
 
 pub struct ModelProperty<T, A> {
     name: String,
@@ -102,10 +102,6 @@ impl<'a, T: Clone + ToShortIdString + Default> ModelExtraOption<'a, T> {
     pub fn call(&self, value: &T) {
         (self.callback)(value);
     }
-}
-
-pub trait ToShortIdString {
-    fn to_short_id_string(&self) -> String;
 }
 
 pub struct ApiContext<'a, A> {

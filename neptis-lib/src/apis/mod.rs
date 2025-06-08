@@ -9,6 +9,7 @@ pub enum NeptisError {
     Io(std::io::Error),
     Sql(sqlx::Error),
     Str(String),
+    Zip(zip::result::ZipError),
 }
 
 impl fmt::Display for NeptisError {
@@ -20,6 +21,7 @@ impl fmt::Display for NeptisError {
             NeptisError::Io(e) => ("IO", e.to_string()),
             NeptisError::Str(e) => ("custom", e.to_string()),
             NeptisError::Sql(e) => ("SQL", e.to_string()),
+            NeptisError::Zip(e) => ("Zip", e.to_string()),
         };
         write!(f, "error in {}: {}", module, e)
     }
@@ -33,6 +35,7 @@ impl error::Error for NeptisError {
             NeptisError::Serde(e) => e,
             NeptisError::Io(e) => e,
             NeptisError::Sql(e) => e,
+            NeptisError::Zip(e) => e,
             NeptisError::Str(_) => return None,
         })
     }
@@ -65,6 +68,12 @@ impl From<std::io::Error> for NeptisError {
 impl From<sqlx::Error> for NeptisError {
     fn from(e: sqlx::Error) -> Self {
         NeptisError::Sql(e)
+    }
+}
+
+impl From<zip::result::ZipError> for NeptisError {
+    fn from(e: zip::result::ZipError) -> Self {
+        NeptisError::Zip(e)
     }
 }
 
@@ -105,3 +114,4 @@ pub fn parse_deep_object(prefix: &str, value: &serde_json::Value) -> Vec<(String
 
 pub mod api;
 pub mod dtos;
+pub mod prelude;

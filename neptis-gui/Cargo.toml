@@ -1,0 +1,55 @@
+[package]
+name = "neptis-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+neptis-lib = { path = "../neptis-lib" }
+ serde = { version = "1", features = ["derive"] }
+ serde_repr = "0.1"
+ serde_json = "1.0"
+ serde_with = "3.12"
+ url = "2.5"
+ reqwest = { version = "0.12", default-features = false, features = [
+     "rustls-tls",
+     "json",
+ ] }
+ uuid = { version = "1", features = ["v4", "serde"] }
+ base64 = "0.22.1"
+ hmac = "0.12.1"
+ sha2 = "0.10.8"
+ rand = "0.9"
+ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+ aes = "0.8.4"
+ cbc = { version = "0.1.2", features = ["alloc"] }
+ totp-rs = { version = "5.7", features = ["gen_secret", "serde_support"] }
+ thiserror = "2.0.12"
+ chrono = { version = "0.4", features = ["serde"] }
+ inquire = { version = "0.7", features = ["date", "editor"] }
+ clearscreen = "4.0.1"
+ cron = "0.15.0"
+ cron-descriptor = "0.1.1"
+ crossterm = "0.29"
+ cron-lingo = "0.4"
+ sha1 = "0.10.6"
+ totp-lite = "2.0.1"
+ regex = "1"
+ libc = "*"
+ log = "0.4"
+ dirs-next = "2"
+ lru = "0.14.0"
+ moka = { version = "0.12.10", features = ["sync"] }
+ flume = "0.11"
+ itertools = "0.14"
+ indexmap = "2"
+ axoupdater = { version = "0.9", features = ["blocking"] }
+ sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros", "migrate", "uuid", "chrono"] }
+ clap = { version = "4.5", features = ["derive", "env"] }
+ reqwest-retry = "0.7"
+ reqwest-middleware = "0.4"
+ zip = "4"
+ duct = "1"
+
+[target.'cfg(unix)'.dependencies]
+fuse_mt = "0.6"
+fuser = "0.13"

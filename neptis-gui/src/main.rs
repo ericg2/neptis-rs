@@ -8,33 +8,15 @@ extern crate serde_json;
 extern crate serde_repr;
 extern crate url;
 
-pub mod apis;
-pub mod arduino_secret;
-pub mod db;
-pub mod filesystem;
-pub mod macros;
-pub mod models;
-pub mod rolling_secret;
 pub mod ui;
 
-use crate::apis::dtos::AlertMode;
-use crate::apis::dtos::AlertTrigger;
-use crate::ui::file_size::FileSize;
-use apis::dtos::PostForMessageApi;
-use apis::dtos::PostForSubscriptionApi;
-use apis::dtos::PutForSubscriptionApi;
-use apis::dtos::{
-    AutoJobType, JobStatus, JobType, PutForAutoJobWebApi, RepoJobDto, SubscriptionDto,
-};
-use arduino_secret::ArduinoSecret;
+use neptis_lib::prelude::*;
+
 use axoupdater::{
     AxoUpdater, AxoupdateError, ReleaseSource, ReleaseSourceType, UpdateRequest, Version,
 };
 use chrono::{Local, Utc};
 use cron::Schedule;
-use db::controller::DbController;
-use db::server::ServerItem;
-use filesystem::NeptisFS;
 use inquire::list_option::ListOption;
 use inquire::{Editor, MultiSelect};
 use reqwest::ClientBuilder;
@@ -56,22 +38,14 @@ use std::{
     time::Duration,
 };
 
-use apis::{
-    NeptisError,
-    dtos::{AutoJobDto, PutForMountApi, SnapshotFileDto},
-};
 use inquire::{Confirm, CustomType, Password, Select, Text, required, validator::Validation};
-use models::SnapshotDto;
 use rolling_secret::RollingSecret;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use ui::manager::{
-    ApiContext, ModelExtraOption, ModelManager, ModelProperty, PromptResult, PropGetType,
-    ToShortIdString,
+    ApiContext, ModelExtraOption, ModelManager, ModelProperty, PromptResult, PropGetType
 };
 use url::Url;
-
-use crate::apis::api::*;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct InternalMountDto {
@@ -1201,7 +1175,7 @@ impl UiApp {
             &id.to_string()
         );
         thread::sleep(Duration::from_secs(2));
-        for i in 0..10 {
+        for i in 0..20 {
             let job = api.get_one_job(id).await?;
             if job.job_status == JobStatus::Successful {
                 println!("> Operation successful!");
@@ -1212,7 +1186,7 @@ impl UiApp {
                 thread::sleep(Duration::from_secs(2));
                 return Err(NeptisError::Str("Operation failed".into()));
             } else {
-                println!("> Waiting for job to finish... ({i}/10) tries");
+                println!("> Waiting for job to finish... ({i}/20) tries");
             }
             thread::sleep(Duration::from_secs(2));
         }
@@ -2864,6 +2838,8 @@ impl UiApp {
         fn format_slash(s: &str) -> String {
             s.strip_suffix("/").unwrap_or(s).to_string()
         }
+
+        RCloneClient::new(self.rt.clone()).unwrap();
 
         // Check if a default server is set.
         if cfg!(not(debug_assertions)) {

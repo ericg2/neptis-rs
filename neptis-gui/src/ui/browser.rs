@@ -14,11 +14,7 @@ use indexmap::IndexMap;
 use inquire::{Confirm, Editor, Select, Text, required, validator::Validation};
 use itertools::Itertools;
 
-use crate::{
-    filesystem::{FsNode, GenericFileType, NeptisFS},
-    to_dto_time,
-    ui::file_size::FileSize,
-};
+use neptis_lib::{prelude::*, to_dto_time};
 
 pub struct FileBrowser {
     fs: NeptisFS,
