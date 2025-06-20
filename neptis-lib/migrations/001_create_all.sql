@@ -10,3 +10,13 @@ CREATE TABLE server_items (
     is_default BOOLEAN NOT NULL,
     PRIMARY KEY (server_name)
 );
+
+CREATE TABLE auto_transfers (
+    id TEXT PRIMARY KEY NOT NULL,
+    server_name TEXT NOT NULL,
+    user_name TEXT NOT NULL,
+    user_password TEXT NOT NULL,
+    point_name TEXT NOT NULL,
+    cron_schedule TEXT NOT NULL,
+    last_ran TEXT
+);

@@ -8,7 +8,7 @@ use chrono::{DateTime, Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::ui::manager::ToShortIdString;
+use crate::traits::ToShortIdString;
 
 use super::{NeptisError, api::PointUsage};
 

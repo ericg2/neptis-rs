@@ -16,9 +16,9 @@ use std::time::Duration;
  */
 use super::dtos::*;
 use crate::apis::NeptisError;
+use crate::file_size::FileSize;
 use crate::rolling_secret::RollingSecret;
-use crate::ui::file_size::FileSize;
-use crate::ui::manager::ToShortIdString;
+use crate::traits::ToShortIdString;
 use base64::engine::Config;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{NaiveDateTime, Utc};
