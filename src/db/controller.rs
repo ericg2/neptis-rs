@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 use super::server::ServerItem;
-use crate::db::transfer::AutoTransfer;
+use crate::prelude::{TransferAutoJob, TransferAutoSchedule};
 
 pub struct DbController {
     rt: Arc<Runtime>,
@@ -143,115 +143,160 @@ impl DbController {
             .block_on(async move { self.delete_server(name).await })
     }
 
-    pub async fn save_auto_transfer(&self, auto: &AutoTransfer) -> Result<(), sqlx::Error> {
+    pub async fn save_transfer_auto_schedule(&self, schedule: &TransferAutoSchedule) -> Result<(), sqlx::Error> {
         if sqlx::query!(
             r#"
-        UPDATE auto_transfers
-        SET
-            server_name = ?,
-            user_name = ?,
-            user_password = ?,
-            point_name = ?,
-            cron_schedule = ?,
-            last_ran = ?
-        WHERE
-            id = ?
-        "#,
-            auto.server_name,
-            auto.user_name,
-            auto.user_password,
-            auto.point_name,
-            auto.cron_schedule,
-            auto.last_ran,
-            auto.id,
+            UPDATE transfer_auto_schedules
+            SET
+                server_name = ?,
+                cron_schedule = ?
+            WHERE
+                schedule_name = ?
+            "#,
+            schedule.server_name,
+            schedule.cron_schedule,
+            schedule.schedule_name,
         )
-        .execute(&self.pool)
-        .await
-        .map(|x| x.rows_affected())?
+            .execute(&self.pool)
+            .await
+            .map(|x| x.rows_affected())?
             <= 0
         {
             sqlx::query!(
                 r#"
-            INSERT INTO auto_transfers (
-                id,
-                server_name,
-                user_name,
-                user_password,
-                point_name,
-                cron_schedule,
-                last_ran
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            "#,
-                auto.id,
-                auto.server_name,
-                auto.user_name,
-                auto.user_password,
-                auto.point_name,
-                auto.cron_schedule,
-                auto.last_ran,
+                INSERT INTO transfer_auto_schedules (
+                    schedule_name,
+                    server_name,
+                    cron_schedule
+                ) VALUES (?, ?, ?)
+                "#,
+                schedule.schedule_name,
+                schedule.server_name,
+                schedule.cron_schedule,
             )
-            .execute(&self.pool)
-            .await?;
+                .execute(&self.pool)
+                .await?;
         }
         Ok(())
     }
 
-    pub async fn save_auto_transfers(&self, autos: &[AutoTransfer]) -> Result<(), sqlx::Error> {
-        let tx = self.pool.begin().await?;
-        for auto in autos {
-            self.save_auto_transfer(&auto).await?;
-        }
-        tx.commit().await
+    pub fn save_transfer_auto_schedule_sync(&self, schedule: &TransferAutoSchedule) -> Result<(), sqlx::Error> {
+        self.rt.block_on(async move { self.save_transfer_auto_schedule(schedule).await })
     }
 
-    pub async fn overwrite_auto_transfers(
-        &self,
-        autos: &[AutoTransfer],
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query!("DELETE FROM auto_transfers")
-            .execute(&self.pool)
+    pub async fn get_all_transfer_auto_schedules(&self) -> Result<Vec<TransferAutoSchedule>, sqlx::Error> {
+        let results = sqlx::query_as::<_, TransferAutoSchedule>(
+            r#"
+            SELECT * FROM transfer_auto_schedules
+            "#
+        )
+            .fetch_all(&self.pool)
             .await?;
-        self.save_auto_transfers(autos).await
+        Ok(results)
     }
 
-    pub fn overwrite_auto_transfers_sync(&self, autos: &[AutoTransfer]) -> Result<(), sqlx::Error> {
-        self.rt
-            .block_on(async move { self.overwrite_auto_transfers(autos).await })
+    pub fn get_all_transfer_auto_schedules_sync(&self) -> Result<Vec<TransferAutoSchedule>, sqlx::Error> {
+        self.rt.block_on(async move { self.get_all_transfer_auto_schedules().await })
     }
 
-    pub async fn delete_auto_transfer(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query!("DELETE FROM auto_transfers WHERE id = ?", id)
+    pub async fn delete_transfer_auto_schedule(&self, schedule_name: &str) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "DELETE FROM transfer_auto_schedules WHERE schedule_name = ?",
+            batch_id
+        )
             .execute(&self.pool)
             .await
             .map(|_| ())
     }
 
-    pub async fn get_all_auto_transfers(&self) -> Result<Vec<AutoTransfer>, sqlx::Error> {
-        let autos = sqlx::query_as::<_, AutoTransfer>(
+    pub fn delete_transfer_auto_schedule_sync(&self, batch_id: &str) -> Result<(), sqlx::Error> {
+        self.rt.block_on(async move { self.delete_transfer_auto_schedule(batch_id).await })
+    }
+
+    pub async fn save_transfer_auto_job(&self, job: &TransferAutoJob) -> Result<(), sqlx::Error> {
+        if sqlx::query!(
             r#"
-        SELECT *
-        FROM auto_transfers
-        "#,
+            UPDATE transfer_auto_jobs
+            SET
+                batch_id = ?,
+                schedule_name = ?,
+                smb_user_name = ?,
+                smb_password = ?,
+                smb_folder = ?,
+                local_folder = ?
+            WHERE
+                id = ?
+            "#,
+            job.batch_id,
+            job.schedule_name,
+            job.smb_user_name,
+            job.smb_password,
+            job.smb_folder,
+            job.local_folder,
+            job.id,
         )
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(autos)
+            .execute(&self.pool)
+            .await
+            .map(|x| x.rows_affected())?
+            <= 0
+        {
+            sqlx::query!(
+                r#"
+                INSERT INTO transfer_auto_jobs (
+                    id,
+                    batch_id,
+                    schedule_name,
+                    smb_user_name,
+                    smb_password,
+                    smb_folder,
+                    local_folder
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                "#,
+                job.id,
+                job.batch_id,
+                job.schedule_name,
+                job.smb_user_name,
+                job.smb_password,
+                job.smb_folder,
+                job.local_folder,
+            )
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
     }
 
-    pub fn get_all_auto_transfers_sync(&self) -> Result<Vec<AutoTransfer>, sqlx::Error> {
-        self.rt
-            .block_on(async move { self.get_all_auto_transfers().await })
+    pub fn save_transfer_auto_job_sync(&self, job: &TransferAutoJob) -> Result<(), sqlx::Error> {
+        self.rt.block_on(async move { self.save_transfer_auto_job(job).await })
     }
 
-    pub fn save_auto_transfer_sync(&self, auto: &AutoTransfer) -> Result<(), sqlx::Error> {
-        self.rt
-            .block_on(async move { self.save_auto_transfer(auto).await })
+    pub async fn get_all_transfer_auto_jobs(&self) -> Result<Vec<TransferAutoJob>, sqlx::Error> {
+        let results = sqlx::query_as::<_, TransferAutoJob>(
+            r#"
+            SELECT * FROM transfer_auto_jobs
+            "#
+        )
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(results)
     }
 
-    pub fn delete_auto_transfer_sync(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        self.rt
-            .block_on(async move { self.delete_auto_transfer(id).await })
+    pub fn get_all_transfer_auto_jobs_sync(&self) -> Result<Vec<TransferAutoJob>, sqlx::Error> {
+        self.rt.block_on(async move { self.get_all_transfer_auto_jobs().await })
+    }
+
+    pub async fn delete_transfer_auto_job(&self, id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "DELETE FROM transfer_auto_jobs WHERE id = ?",
+            id
+        )
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    pub fn delete_transfer_auto_job_sync(&self, id: &str) -> Result<(), sqlx::Error> {
+        self.rt.block_on(async move { self.delete_transfer_auto_job(id).await })
     }
 
     fn get_db(db_path: Option<String>) -> String {

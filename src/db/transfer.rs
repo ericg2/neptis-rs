@@ -1,15 +1,21 @@
-use chrono::NaiveDateTime;
-use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use cron::Schedule;
+use sqlx::{FromRow, Row};
 use uuid::Uuid;
 
-#[derive(Clone, Default, Serialize, Deserialize, FromRow)]
-pub struct AutoTransfer {
-    pub id: Uuid,
+#[derive(Clone, FromRow, Eq, PartialEq)]
+pub struct TransferAutoSchedule {
+    pub schedule_name: String,
     pub server_name: String,
-    pub user_name: String,
-    pub user_password: String,
-    pub point_name: String,
     pub cron_schedule: String,
-    pub last_ran: Option<NaiveDateTime>,
+}
+
+#[derive(Clone, FromRow, Eq, PartialEq)]
+pub struct TransferAutoJob {
+    pub id: Uuid,
+    pub batch_id: Uuid,
+    pub schedule_name: String,
+    pub smb_user_name: String,
+    pub smb_password: String,
+    pub smb_folder: String,
+    pub local_folder: String,
 }

@@ -21,12 +21,6 @@ pub enum ValidateError {
 #[derive(Debug, Error)]
 pub enum NeptisError {
     #[error(transparent)]
-    DbQuery(#[from] diesel::result::Error),
-
-    #[error(transparent)]
-    DbConnection(#[from] diesel::result::ConnectionError),
-
-    #[error(transparent)]
     IoError(#[from] std::io::Error),
 
     #[error("Internal Error: {0}")]
@@ -60,8 +54,6 @@ impl NeptisError {
 impl<'r> Responder<'r, 'static> for NeptisError {
     fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'static> {
         let status = match self {
-            NeptisError::DbQuery(_) => Status::NotFound,
-            NeptisError::DbConnection(_) => Status::InternalServerError,
             NeptisError::InternalError(_) => Status::InternalServerError,
             NeptisError::BadRequest(_) => Status::BadRequest,
             NeptisError::Unauthorized(_) => Status::Unauthorized,

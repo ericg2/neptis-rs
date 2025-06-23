@@ -29,7 +29,7 @@ totp-rs = { version = "5.7", features = ["gen_secret", "serde_support"] }
 chrono = { version = "0.4", features = ["serde"] }
 inquire = { version = "0.7", features = ["date", "editor"] }
 clearscreen = "4.0.1"
-cron = "0.15.0"
+cron = { version = "0.15.0", features = ["serde"] }
 cron-descriptor = "0.1.1"
 crossterm = "0.29"
 cron-lingo = "0.4"

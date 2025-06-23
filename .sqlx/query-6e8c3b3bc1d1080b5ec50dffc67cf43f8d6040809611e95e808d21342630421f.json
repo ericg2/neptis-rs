@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE transfer_auto_schedules\n            SET\n                server_name = ?,\n                cron_schedule = ?\n            WHERE\n                schedule_name = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "6e8c3b3bc1d1080b5ec50dffc67cf43f8d6040809611e95e808d21342630421f"
+}

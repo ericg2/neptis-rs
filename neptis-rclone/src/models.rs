@@ -1,12 +1,8 @@
-﻿use std::sync::mpsc::{Receiver, Sender};
-use crate::schema::*;
-use crate::uuid::SqliteUuid;
-use chrono::NaiveDateTime;
-use diesel::{AsChangeset, Insertable, Queryable};
+﻿use chrono::NaiveDateTime;
 use neptis_lib::prelude::ServerItem;
-use rocket::http::Method::Trace;
 use rocket::serde::Serialize;
 use serde::Deserialize;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use uuid::Uuid;
 
@@ -90,23 +86,6 @@ impl TransferJob {
             TransferJobStatus::Successful
         }
     }
-}
-
-#[derive(Clone, Queryable, AsChangeset, Insertable)]
-pub struct TransferAutoSchedule {
-    pub batch_id: SqliteUuid,
-    pub server_name: String,
-    pub cron_schedule: String,
-}
-
-#[derive(Clone, Queryable, AsChangeset, Insertable)]
-pub struct TransferAutoJob {
-    pub id: SqliteUuid,
-    pub batch_id: SqliteUuid,
-    pub smb_user_name: String,
-    pub smb_password: String,
-    pub smb_folder: String,
-    pub local_folder: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]

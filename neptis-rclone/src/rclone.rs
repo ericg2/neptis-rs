@@ -1,19 +1,18 @@
 ﻿use crate::dtos::TransferJobDto;
 use crate::errors::NeptisError;
 use crate::models::{RCloneStat, TransferJob, TransferJobStatus};
-use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use chrono::Utc;
-use diesel::dsl::now;
 use duct::cmd;
 use neptis_lib::prelude::DbController;
-use rocket::futures::future::ok;
+use rocket::yansi::Paint;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
-use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, SystemTime};
 use std::{
     fs,
@@ -22,7 +21,6 @@ use std::{
     sync::Arc,
     thread,
 };
-use rocket::yansi::Paint;
 use tokio::runtime::Runtime;
 use url::Url;
 use uuid::Uuid;

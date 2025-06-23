@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO server_items (\n                    server_name,\n                    server_endpoint,\n                    server_password,\n                    user_name,\n                    user_password,\n                    arduino_endpoint,\n                    arduino_password,\n                    auto_fuse,\n                    is_default\n                ) VALUES (\n                    ?,\n                    ?,\n                    ?,\n                    ?,\n                    ?,\n                    ?,\n                    ?,\n                    ?,\n                    ?\n                )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "5f6516ba4fea8fa98f605b4a51efae79100a56a614b667ee8864ef4ec2847166"
+}

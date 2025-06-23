@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM server_items WHERE server_name = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "e0c812eca3adc8bda4bd20a0a3b8c0986fff2951f3c45971bf2ef00bc083bd56"
+}

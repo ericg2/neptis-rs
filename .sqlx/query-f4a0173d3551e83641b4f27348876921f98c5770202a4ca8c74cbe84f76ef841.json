@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE transfer_auto_jobs\n            SET\n                batch_id = ?,\n                schedule_name = ?,\n                smb_user_name = ?,\n                smb_password = ?,\n                smb_folder = ?,\n                local_folder = ?\n            WHERE\n                id = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "f4a0173d3551e83641b4f27348876921f98c5770202a4ca8c74cbe84f76ef841"
+}

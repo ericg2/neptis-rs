@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE server_items\n            SET\n                server_endpoint = ?,\n                server_password = ?,\n                user_name = ?,\n                user_password = ?,\n                arduino_endpoint = ?,\n                auto_fuse = ?,\n                is_default = ?\n            WHERE\n                server_name = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "832c17b6bf9ed75473646caf40583bc0bbe66c921f327f3e95db785d005625d3"
+}

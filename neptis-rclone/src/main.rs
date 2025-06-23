@@ -1,6 +1,4 @@
 use crate::rclone::{RCloneClient, RCloneJobLaunchInfo, RCloneSettings};
-use diesel::deserialize::FromSql;
-use diesel::serialize::ToSql;
 use neptis_lib::prelude::DbController;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -11,8 +9,6 @@ mod errors;
 mod macros;
 mod models;
 mod rclone;
-mod schema;
-mod uuid;
 
 fn main() {
     let rt = Arc::new(Runtime::new().unwrap());
