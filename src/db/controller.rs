@@ -1,3 +1,4 @@
+use std::fs;
 use std::sync::Arc;
 
 use sqlx::{
@@ -229,7 +230,7 @@ impl DbController {
         let autos = sqlx::query_as::<_, AutoTransfer>(
             r#"
         SELECT *
-        FROM auto_transfer
+        FROM auto_transfers
         "#,
         )
         .fetch_all(&self.pool)
@@ -251,6 +252,23 @@ impl DbController {
     pub fn delete_auto_transfer_sync(&self, id: Uuid) -> Result<(), sqlx::Error> {
         self.rt
             .block_on(async move { self.delete_auto_transfer(id).await })
+    }
+
+    fn get_db(db_path: Option<String>) -> String {
+        if let Some(b_dir) = dirs_next::home_dir().map(|x| x.join(".neptis")) {
+            if !b_dir.exists() {
+                fs::create_dir_all(b_dir).expect("Failed to create Neptis directory!");
+            }
+        }
+        db_path.clone()
+            .or(
+                dirs_next::home_dir()
+                    .map(|x|x.join(".neptis/neptis.db").to_str().unwrap().to_string()))
+            .expect("Failed to find database location! Please set 'NEPTIS_DB' to a path, or use a user account with a home directory.")
+    }
+
+    pub fn new_default(rt: Arc<Runtime>, db_path: Option<String>) -> Self {
+        Self::new(rt, &Self::get_db(db_path))
     }
 
     pub fn new(rt: Arc<Runtime>, path: &str) -> Self {

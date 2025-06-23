@@ -192,7 +192,7 @@ impl NeptisFS {
 
         // Always include "." and ".." entries (relative paths)
         output.push(FsNode {
-            path: PathBuf::from("."), // Relative path!
+            path: PathBuf::from(""), // Relative path!
             attr: Self::generic_dir_attr(),
         });
         output.push(FsNode {

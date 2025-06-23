@@ -1,7 +1,6 @@
 pub mod apis;
 pub mod db;
 pub mod models;
-pub mod rclone;
 pub mod arduino_secret;
 pub mod rolling_secret;
 pub mod filesystem;
@@ -14,7 +13,6 @@ pub mod prelude {
     pub use crate::apis::NeptisError;
     pub use crate::db::prelude::*;
     pub use crate::models::*;
-    pub use crate::rclone::prelude::*;
     pub use crate::arduino_secret::*;
     pub use crate::file_size::*;
     pub use crate::filesystem::*;

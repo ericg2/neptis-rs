@@ -11,12 +11,18 @@ CREATE TABLE server_items (
     PRIMARY KEY (server_name)
 );
 
-CREATE TABLE auto_transfers (
-    id TEXT PRIMARY KEY NOT NULL,
+CREATE TABLE transfer_auto_schedules (
+    batch_id TEXT NOT NULL,
     server_name TEXT NOT NULL,
-    user_name TEXT NOT NULL,
-    user_password TEXT NOT NULL,
-    point_name TEXT NOT NULL,
     cron_schedule TEXT NOT NULL,
-    last_ran TEXT
+    PRIMARY KEY (batch_id)
+);
+
+CREATE TABLE transfer_auto_jobs (
+    id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    smb_user_name TEXT NOT NULL,
+    smb_password TEXT NOT NULL,
+    smb_folder TEXT NOT NULL,
+    local_folder TEXT NOT NULL
 );

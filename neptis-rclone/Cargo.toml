@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+neptis-lib = { path = ".." }
 base64 = "0.22.1"
 chrono = { version = "0.4.41", features = ["serde"] }
 reqwest = "0.12.20"

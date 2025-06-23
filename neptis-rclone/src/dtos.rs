@@ -1,26 +1,46 @@
-﻿use crate::models::RCloneFileTransferStat;
+﻿use crate::models::{TransferJobStatus, RCloneStat, TransferJob};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use std::alloc::GlobalAlloc;
 use uuid::Uuid;
+use neptis_lib::prelude::ServerItem;
 
 #[derive(Clone, Serialize, Deserialize)]
-pub enum RCloneJobStatus {
-    NotStarted,
-    Running,
-    Successful,
-    Failed
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct RCloneJobDto {
-    pub batch_id: Uuid,
+pub struct TransferJobDto {
     pub job_id: Uuid,
-    pub error_count: u64,
-    pub status: RCloneJobStatus,
-    pub total_bytes: u64,
-    pub done_bytes: u64,
-    pub bytes_per_sec: f64,
+    pub batch_id: Uuid,
+    pub server_name: String,
+    pub smb_folder: String,
+    pub local_folder: String,
+    pub stat: TransferJobStatus,
+    pub errors: Vec<String>,
+    pub last_stats: Option<RCloneStat>,
     pub start_date: Option<NaiveDateTime>,
     pub end_date: Option<NaiveDateTime>,
+    pub last_updated: NaiveDateTime,
+}
+
+impl <T: AsRef<TransferJob>> From<T> for TransferJobDto {
+    fn from(job: T) -> Self {
+        let job_ref = job.as_ref();
+        let stat = job_ref.status();
+        TransferJobDto {
+            job_id: job_ref.job_id.clone(),
+            batch_id: job_ref.batch_id.clone(),
+            server_name: job_ref.server.server_name.clone(),
+            smb_folder: job_ref.smb_folder.clone(),
+            local_folder: job_ref.local_folder.clone(),
+            errors: job_ref.fatal_errors.clone(),
+            last_stats: job_ref.last_stats.clone(),
+            start_date: job_ref.start_date.clone(),
+            end_date: job_ref.end_date.clone(),
+            last_updated: job_ref.last_updated.clone(),
+            stat
+        }
+    }
+}
+
+impl AsRef<TransferJob> for TransferJob {
+    fn as_ref(&self) -> &TransferJob {
+        self
+    }
 }

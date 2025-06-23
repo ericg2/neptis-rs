@@ -2838,9 +2838,7 @@ impl UiApp {
         fn format_slash(s: &str) -> String {
             s.strip_suffix("/").unwrap_or(s).to_string()
         }
-
-        RCloneClient::new(self.rt.clone()).unwrap();
-
+        
         // Check if a default server is set.
         if cfg!(not(debug_assertions)) {
             if let Some(d_item) = self
@@ -3109,19 +3107,6 @@ impl UiApp {
         );
     }
 
-    fn get_db(db_path: Option<String>) -> String {
-        if let Some(b_dir) = dirs_next::home_dir().map(|x| x.join(".neptis")) {
-            if !b_dir.exists() {
-                fs::create_dir_all(b_dir).expect("Failed to create Neptis directory!");
-            }
-        }
-        db_path.clone()
-            .or(
-                dirs_next::home_dir()
-                    .map(|x|x.join(".neptis/neptis.db").to_str().unwrap().to_string()))
-                    .expect("Failed to find database location! Please set 'NEPTIS_DB' to a path, or use a user account with a home directory.")
-    }
-
     #[cfg(unix)]
     pub fn new(db_path: Option<String>, mnt: Option<String>) -> UiApp {
         let rt = Arc::new(Runtime::new().expect("Expected Runtime to start!"));
@@ -3138,7 +3123,7 @@ impl UiApp {
     #[cfg(not(unix))]
     pub fn new(db_path: Option<String>) -> UiApp {
         let rt = Arc::new(Runtime::new().expect("Expected Runtime to start!"));
-        let db = DbController::new(rt.clone(), &Self::get_db(db_path));
+        let db = DbController::new_default(rt.clone(), db_path);
         UiApp {
             rt: rt.clone(),
             api: Arc::new(RwLock::new(None)),
