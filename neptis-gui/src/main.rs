@@ -16,7 +16,7 @@ use axoupdater::{
     AxoUpdater, AxoupdateError, ReleaseSource, ReleaseSourceType, UpdateRequest, Version,
 };
 use chrono::{Local, Utc};
-use cron::Schedule;
+use cron::{Schedule, TimeUnitSpec};
 use inquire::list_option::ListOption;
 use inquire::{Editor, MultiSelect};
 use reqwest::ClientBuilder;
@@ -27,6 +27,10 @@ use std::str::FromStr;
 use ui::browser::FileBrowser;
 use uuid::Uuid;
 
+use inquire::{Confirm, CustomType, Password, Select, Text, required, validator::Validation};
+use rolling_secret::RollingSecret;
+use serde::{Deserialize, Serialize};
+use std::ops::Deref;
 use std::sync::RwLock;
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -37,13 +41,9 @@ use std::{
     thread,
     time::Duration,
 };
-
-use inquire::{Confirm, CustomType, Password, Select, Text, required, validator::Validation};
-use rolling_secret::RollingSecret;
-use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use ui::manager::{
-    ApiContext, ModelExtraOption, ModelManager, ModelProperty, PromptResult, PropGetType
+    ApiContext, ModelExtraOption, ModelManager, ModelProperty, PromptResult, PropGetType,
 };
 use url::Url;
 
@@ -60,6 +60,52 @@ impl ToShortIdString for InternalMountDto {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct InternalTransferAutoSchedule {
+    schedule_name: String,
+    cron_schedule: String,
+    smb_password: String,
+}
+
+impl ToShortIdString for InternalTransferAutoSchedule {
+    fn to_short_id_string(&self) -> String {
+        self.schedule_name.clone()
+    }
+}
+
+impl From<TransferAutoSchedule> for InternalTransferAutoSchedule {
+    fn from(value: TransferAutoSchedule) -> Self {
+        InternalTransferAutoSchedule {
+            schedule_name: value.schedule_name,
+            cron_schedule: value.cron_schedule,
+            smb_password: value.smb_password,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct InternalTransferAutoJob {
+    action_name: String,
+    smb_folder: String,
+    local_folder: String,
+}
+
+impl ToShortIdString for InternalTransferAutoJob {
+    fn to_short_id_string(&self) -> String {
+        self.action_name.clone()
+    }
+}
+
+impl From<TransferAutoJob> for InternalTransferAutoJob {
+    fn from(value: TransferAutoJob) -> Self {
+        InternalTransferAutoJob {
+            action_name: value.action_name,
+            smb_folder: value.smb_folder,
+            local_folder: value.local_folder,
+        }
+    }
+}
+
 #[cfg(unix)]
 struct UiApp {
     rt: Arc<Runtime>,
@@ -67,6 +113,7 @@ struct UiApp {
     fuse: Mutex<Option<fuser::BackgroundSession>>,
     db: DbController,
     mnt: Option<String>,
+    server: RwLock<Option<ServerItem>>,
 }
 
 #[cfg(not(unix))]
@@ -74,6 +121,7 @@ struct UiApp {
     rt: Arc<Runtime>,
     api: Arc<RwLock<Option<WebApi>>>,
     db: DbController,
+    server: RwLock<Option<ServerItem>>,
 }
 
 static DEFAULT_PASS: &'static str = "default123";
@@ -545,11 +593,358 @@ impl UiApp {
                 }
             }
         }
-        self.on_manage_autojobs(mount);
+        self.on_manage_auto_jobs(mount);
+    }
+
+    fn show_rclone_schedules(&self) {
+        let server_owned = {
+            let _lock = &*self.server.read().unwrap();
+            _lock
+                .as_ref()
+                .expect("Expected a server connection!")
+                .server_name
+                .clone()
+        };
+        let smb_name = {
+            let m_api = &*self.api.read().unwrap();
+            m_api.as_ref().map(|x| format!("{}-smb", x.get_username()))
+        };
+        let ret = ModelManager::new(
+            Some(&(&self.db, &smb_name)),
+            vec![
+                ModelProperty::new(
+                    "Schedule Name",
+                    true,
+                    |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
+                        "Please enter Schedule Name",
+                    )
+                    .with_validator(required!())
+                    .with_initial_value(&dto.schedule_name)
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    {
+                        Some(x) => {
+                            dto.schedule_name = x;
+                            PromptResult::Ok
+                        }
+                        None => PromptResult::Cancel,
+                    },
+                    |dto| dto.schedule_name.clone(),
+                ),
+                ModelProperty::new(
+                    "Cron Schedule",
+                    false,
+                    |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
+                        "Please enter Cron Schedule (UTC)",
+                    )
+                    .with_validator(required!())
+                    .with_validator(|s: &str| match Schedule::from_str(s) {
+                        Ok(_) => Ok(Validation::Valid),
+                        Err(_) => Ok(Validation::Invalid("Cron schedule is not valid!".into())),
+                    })
+                    .with_initial_value(&dto.cron_schedule)
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    {
+                        Some(x) => {
+                            dto.cron_schedule = x;
+                            PromptResult::Ok
+                        }
+                        None => PromptResult::Cancel,
+                    },
+                    |dto| dto.cron_schedule.clone(),
+                ),
+                ModelProperty::new(
+                    "SMB Password",
+                    false,
+                    |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
+                        "Please enter SMB Password",
+                    )
+                    .with_validator(required!())
+                    .with_default(&dto.smb_password)
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    {
+                        Some(x) => {
+                            dto.smb_password = x;
+                            PromptResult::Ok
+                        }
+                        None => PromptResult::Cancel,
+                    },
+                    |dto| dto.smb_password.clone(),
+                ),
+            ],
+            Box::new({
+                let server_owned = server_owned.clone();
+                move |ctx| {
+                    let db = ctx
+                        .api
+                        .as_deref()
+                        .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                    let server_inner = server_owned.clone(); // clone again for async block
+                    Ok(db
+                        .0
+                        .get_all_transfer_auto_schedules_sync()?
+                        .into_iter()
+                        .filter(|x| x.server_name == server_inner)
+                        .map(|x| x.into())
+                        .collect::<Vec<_>>())
+                }
+            }),
+        )
+        .with_select_title("Select a Schedule (Step 1)")
+        .with_back()
+        .with_delete(Box::new({
+            let server_owned = server_owned.clone();
+            move |ctx, dto| {
+                let db = ctx
+                    .api
+                    .as_deref()
+                    .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                let server_inner = server_owned.clone();
+                Ok(db
+                    .0
+                    .delete_transfer_auto_schedule_sync(&dto.schedule_name, &server_inner)?)
+            }
+        }))
+        .with_modify(Box::new({
+            let server_owned = server_owned.clone();
+            move |ctx, all_items, dto| {
+                let db = ctx
+                    .api
+                    .as_deref()
+                    .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                let server_inner = server_owned.clone();
+
+                // Check to see if any saved entries have a different password to
+                // make sure the user has not made a typo or anything.
+                const STR_CHANGE_ALL: &'static str = "*** Change All To This ***";
+                const STR_ACCEPT: &'static str = "*** Accept This Password ***";
+                let mut all_passwords = all_items
+                    .iter()
+                    .map(|x| x.smb_password.clone())
+                    .filter(|x| !x.is_empty())
+                    .unique()
+                    .collect::<Vec<_>>();
+
+                let mut final_password = dto.smb_password.clone();
+                if !all_passwords.contains(&dto.smb_password) {
+                    all_passwords.push(STR_CHANGE_ALL.into());
+                    all_passwords.push(STR_ACCEPT.into());
+
+                    println!("\n"); // *** create a newline buffer.
+                    let ret = Select::new(
+                        "Multiple passwords on the same account! Did you make a mistake?",
+                        all_passwords,
+                    )
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    .unwrap_or(STR_ACCEPT.to_string());
+                    if ret == STR_CHANGE_ALL {
+                        for item in all_items.iter() {
+                            db.0.save_transfer_auto_schedule_sync(&TransferAutoSchedule {
+                                schedule_name: item.schedule_name.clone(),
+                                server_name: server_inner.clone(),
+                                cron_schedule: item.cron_schedule.clone(),
+                                smb_password: dto.smb_password.clone(), // *** not a spelling error
+                                smb_user_name: db
+                                    .1
+                                    .clone()
+                                    .ok_or(NeptisError::Str("Failed to find username!".into()))?,
+                            })?
+                        }
+                    } else if ret != STR_ACCEPT {
+                        final_password = ret;
+                    }
+                }
+                Ok(db
+                    .0
+                    .save_transfer_auto_schedule_sync(&TransferAutoSchedule {
+                        schedule_name: dto.schedule_name.clone(),
+                        server_name: server_inner.clone(),
+                        cron_schedule: dto.cron_schedule.clone(),
+                        smb_password: final_password.clone(),
+                        smb_user_name: db
+                            .1
+                            .clone()
+                            .ok_or(NeptisError::Str("Failed to find username!".into()))?,
+                    })?)
+            }
+        }))
+        .do_display();
+        match ret {
+            Ok(ret) => match ret {
+                Some(x) => self.on_manage_rclone_actions(&x.schedule_name, &server_owned),
+                None => self.show_dashboard(),
+            },
+            Err(e) => {
+                clearscreen::clear().expect("Failed to clear screen!");
+                println!("*** An unexpected error has occurred. Error: {e}");
+                thread::sleep(Duration::from_secs(2));
+                self.show_dashboard()
+            }
+        }
+    }
+
+    fn on_manage_rclone_actions(&self, schedule_name: &str, server_name: &str) {
+        let schedule_owned = schedule_name.to_string();
+        let server_owned = server_name.to_string();
+        let fb = FileBrowser::new(NeptisFS::new(self.api.clone(), self.rt.clone()));
+        let ret = ModelManager::new(
+            Some(&(&self.db, &fb)),
+            vec![
+                ModelProperty::new(
+                    "Action Name",
+                    true,
+                    |_, dto: &mut InternalTransferAutoJob| match Text::new(
+                        "Please enter Action Name",
+                    )
+                        .with_validator(required!())
+                        .with_initial_value(&dto.action_name)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                    {
+                        Some(x) => {
+                            dto.action_name = x;
+                            PromptResult::Ok
+                        }
+                        None => PromptResult::Cancel,
+                    },
+                    |dto| dto.action_name.clone(),
+                ),
+                ModelProperty::new(
+                    "Local From",
+                    false,
+                    |_, dto: &mut InternalTransferAutoJob| match Text::new(
+                        "Please enter valid Local From",
+                    )
+                        .with_validator(required!())
+                        .with_validator(|s: &str| {
+                            if fs::exists(s).unwrap_or(false) {
+                                Ok(Validation::Valid)
+                            } else {
+                                Ok(Validation::Invalid("Path needs to already exist!".into()))
+                            }
+                        })
+                        .with_initial_value(&dto.local_folder)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                    {
+                        Some(x) => {
+                            dto.local_folder = x;
+                            PromptResult::Ok
+                        }
+                        None => PromptResult::Cancel,
+                    },
+                    |dto| dto.local_folder.clone(),
+                ),
+                ModelProperty::new(
+                    "Remote Folder",
+                    false,
+                    |ctx, dto: &mut InternalTransferAutoJob| {
+                        let fs = ctx.api.as_deref().unwrap().1;
+                        if Confirm::new("You will now be asked to select a remote SMB folder. Do you want to continue?")
+                            .with_default(true)
+                            .prompt_skippable()
+                            .expect("Failed to show prompt!")
+                            .map(|x| if !x { None } else { Some(x) })
+                            .is_none() {
+                            return PromptResult::Cancel;
+                        }
+                        match fs.show_browser(FileBrowserMode::SelectFolderRW) {
+                            Some(x) => {
+                                dto.smb_folder = x.to_string_lossy().replace("\\", "/");
+                                PromptResult::Ok
+                            }
+                            None => PromptResult::Cancel,
+                        }
+                    },
+                    |dto| dto.smb_folder.clone(),
+                ),
+            ],
+            Box::new({
+                let schedule_owned = schedule_owned.clone();
+                let server_owned = server_owned.clone();
+                move |ctx| {
+                    let db = ctx
+                        .api
+                        .as_deref()
+                        .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                    let schedule_inner = schedule_owned.clone(); // clone again for async block
+                    let server_inner = server_owned.clone();
+                    Ok(db
+                        .0
+                        .get_all_transfer_auto_jobs_sync()?
+                        .into_iter()
+                        .filter(|x| {
+                            x.schedule_name == schedule_inner && x.server_name == server_inner
+                        })
+                        .map(|x| x.into())
+                        .collect::<Vec<_>>())
+                }
+            }),
+        )
+            .with_select_title(format!(
+                "Select Actions for this Schedule ({}) (Step 2)",
+                schedule_name
+            ))
+            .with_back()
+            .with_delete(Box::new({
+                let schedule_owned = schedule_owned.clone();
+                let server_owned = server_owned.clone();
+                move |ctx, dto| {
+                    let db = ctx
+                        .api
+                        .as_deref()
+                        .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                    let schedule_inner = schedule_owned.clone();
+                    let server_inner = server_owned.clone();
+                    Ok(db.0.delete_transfer_auto_job_sync(
+                        &schedule_inner,
+                        &server_inner,
+                        &dto.action_name,
+                    )?)
+                }
+            }))
+            .with_modify(Box::new({
+                let schedule_owned = schedule_owned.clone();
+                let server_owned = server_owned.clone();
+                move |ctx, _, dto| {
+                    let db = ctx
+                        .api
+                        .as_deref()
+                        .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                    let schedule_inner = schedule_owned.clone();
+                    let server_inner = server_owned.clone();
+                    Ok(db.0.save_transfer_auto_job_sync(&TransferAutoJob {
+                        server_name: server_inner,
+                        schedule_name: schedule_inner,
+                        action_name: dto.action_name.clone(),
+                        smb_folder: dto.smb_folder.clone(),
+                        local_folder: dto.local_folder.clone(),
+                    })?)
+                }
+            }))
+            .do_display();
+
+        clearscreen::clear().expect("Failed to clear screen!");
+        match ret {
+            Ok(x) => {
+                if x.is_some() {
+                    println!("*** No options are available as of right now.");
+                    thread::sleep(Duration::from_secs(2));
+                }
+            }
+            Err(e) => {
+                println!("*** An unexpected error has occurred. Error: {e}");
+                thread::sleep(Duration::from_secs(2));
+            }
+        }
+        self.show_rclone_schedules();
     }
 
     // inspected
-    fn on_manage_autojobs(&self, mount: &str) {
+    fn on_manage_auto_jobs(&self, mount: &str) {
         let ret = {
             let mount_owned = mount.to_string();
             let m_api = &*self.api.read().unwrap();
@@ -1019,7 +1414,7 @@ impl UiApp {
         {
             STR_MANAGE_SNAPSHOT => self.on_manage_snapshot(mount),
             STR_MANAGE_JOB => self.on_view_jobs(mount, None),
-            STR_MANAGE_AUTO_JOB => self.on_manage_autojobs(mount),
+            STR_MANAGE_AUTO_JOB => self.on_manage_auto_jobs(mount),
             STR_START_BACKUP => self.on_start_job(mount, JobType::Backup),
             STR_START_CHECK => self.on_start_job(mount, JobType::Check),
             STR_START_RESTORE => self.on_start_job(mount, JobType::Restore),
@@ -1030,6 +1425,51 @@ impl UiApp {
     // inspected
     fn on_select_user(&self, user: &UserDto, ack: bool) {
         clearscreen::clear().expect("Failed to clear screen!");
+        let handle_sync = |new_pass: &str| -> Result<(), NeptisError> {
+            // 6-24-25: See if the user wants to change their client-side jobs (if any).
+            if let Some(server_name) = {
+                let _lock = &*self.server.read().unwrap();
+                _lock.as_ref().map(|x| x.server_name.clone())
+            } {
+                use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
+                let sync_jobs = self
+                    .db
+                    .get_all_transfer_auto_schedules_sync()?
+                    .into_iter()
+                    .filter(|x| {
+                        x.server_name == server_name
+                            && x.smb_user_name == format!("{}-smb", &user.user_name)
+                    })
+                    .collect::<Vec<_>>();
+                let job_str = sync_jobs
+                    .iter()
+                    .map(|x| {
+                        format!(
+                            "{} ({})",
+                            x.schedule_name,
+                            get_description_cron(&x.cron_schedule).unwrap_or("N/A".into())
+                        )
+                    })
+                    .join("\n");
+                if sync_jobs.len() > 0 {
+                    println!("\n{job_str}\n");
+                    if Confirm::new(
+                        "This user has several sync jobs. Do you want to set the new password to the above items?",
+                    ).prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        .unwrap_or(false) {
+                        // If we are setting the password - update it for all!
+                        for mut item in sync_jobs {
+                            item.smb_password = new_pass.to_string();
+                            self.db.save_transfer_auto_schedule_sync(&item)?;
+                        }
+                        println!("*** Done!");
+                    }
+                }
+            }
+
+            Ok(())
+        };
         if ack
             || Confirm::new(
                 "The only available option is to change the password. Do you want to do this?",
@@ -1047,6 +1487,7 @@ impl UiApp {
                 match (|| {
                     let m_api = &*self.api.read().unwrap();
                     if let Some(api) = m_api {
+                        let p2 = p.clone();
                         self.rt
                             .block_on(async move {
                                 api.put_one_user(
@@ -1057,18 +1498,23 @@ impl UiApp {
                                         is_admin: None,
                                         max_data_bytes: None,
                                         max_snapshot_bytes: None,
-                                        password: Some(p),
+                                        password: Some(p2),
                                     },
                                 )
                                 .await
                             })
-                            .map(|_| ())
+                            .map(|_| ())?;
+                        Ok(p)
                     } else {
                         Err(NeptisError::Str("API is invalid!".into()))
                     }
                 })() {
-                    Ok(_) => {
+                    Ok(pass) => {
                         println!("**** Password changed successfully.");
+                        match handle_sync(&pass) {
+                            Ok(_) => println!("*** Job sync successful!"),
+                            Err(e) => println!("*** Job sync failed! Error: {e}"),
+                        }
                         thread::sleep(Duration::from_secs(2));
                         self.show_users();
                     }
@@ -1195,7 +1641,6 @@ impl UiApp {
         Err(NeptisError::Str("Operation failed".into()))
     }
 
-    // inspected
     fn show_points(&self) {
         let ret = {
             let m_api = &*self.api.read().unwrap();
@@ -2264,7 +2709,9 @@ impl UiApp {
     }
 
     fn start_browser(&self) {
-        FileBrowser::new(NeptisFS::new(self.api.clone(), self.rt.clone())).show_browser();
+        FileBrowser::new(NeptisFS::new(self.api.clone(), self.rt.clone()))
+            .show_browser(FileBrowserMode::Normal)
+            .map(|_| ());
         self.show_dashboard();
     }
 
@@ -2433,6 +2880,7 @@ impl UiApp {
 
         const STR_BROWSER: &str = "File Browser";
         const STR_FUSE: &str = "Start FUSE";
+        const STR_SYNC: &str = "Manage Client-Side Sync";
         const STR_BREAKDOWN: &str = "Show Usage Breakdown";
         const STR_MESSAGE: &str = "View Messages";
         const STR_POINTS: &str = "Manage Points";
@@ -2525,6 +2973,7 @@ impl UiApp {
             menu_items.push(STR_SYSTEM);
         }
 
+        menu_items.push(STR_SYNC);
         menu_items.push(STR_NOTIFICATION);
         menu_items.push(STR_PASSWORD);
         menu_items.push(STR_SMB);
@@ -2546,6 +2995,7 @@ impl UiApp {
             Some(STR_SYSTEM) => self.show_system(),
             Some(STR_PASSWORD) => self.show_change_password(),
             Some(STR_SMB) => self.show_smb(),
+            Some(STR_SYNC) => self.show_rclone_schedules(),
             Some(STR_NOTIFICATION) => self.show_notifications(),
             Some(STR_MESSAGE) => self.show_messages(),
             Some(STR_BACK) => {
@@ -2576,6 +3026,8 @@ impl UiApp {
     fn show_connect(&self, server: ServerItem, auto: bool) {
         {
             let mut api = self.api.write().unwrap();
+            let mut server = self.server.write().unwrap();
+            *server = None;
             *api = None;
         }
         clearscreen::clear().unwrap();
@@ -2693,8 +3145,8 @@ impl UiApp {
                 }
             }
             if good {
-                if let Some(a_endpoint) = server.arduino_endpoint {
-                    if let Some(a_pass) = server.arduino_password {
+                if let Some(a_endpoint) = server.arduino_endpoint.clone() {
+                    if let Some(a_pass) = server.arduino_password.clone() {
                         println!("Initial connection failed. Attempting to wake up PC...");
 
                         let ep = a_endpoint.as_str();
@@ -2802,7 +3254,9 @@ impl UiApp {
             Ok(x) => {
                 {
                     let mut api = self.api.write().unwrap();
-                    *api = Some(x)
+                    *api = Some(x);
+                    let mut serv = self.server.write().unwrap();
+                    *serv = Some(server.clone());
                 }
                 println!("Connection successful!");
                 #[cfg(unix)]
@@ -2838,7 +3292,7 @@ impl UiApp {
         fn format_slash(s: &str) -> String {
             s.strip_suffix("/").unwrap_or(s).to_string()
         }
-        
+
         // Check if a default server is set.
         if cfg!(not(debug_assertions)) {
             if let Some(d_item) = self
@@ -2875,10 +3329,10 @@ impl UiApp {
                         true,
                         |_, serv: &mut ServerItem| {
                             match Text::new("Please enter Server Name")
-                            .with_initial_value(serv.server_name.as_str())
-                            .with_validator(required!())
-                            .prompt_skippable()
-                            .expect("Failed to show prompt!") {
+                                .with_initial_value(serv.server_name.as_str())
+                                .with_validator(required!())
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
                                 Some(x) => {
                                     serv.server_name = x;
                                     PromptResult::Ok
@@ -2893,23 +3347,23 @@ impl UiApp {
                         false,
                         |_, serv: &mut ServerItem| {
                             match Text::new("Enter Server URL")
-                            .with_initial_value(serv.server_endpoint.as_str())
-                            .with_validator(|input: &str| {
-                                if input.trim().is_empty() {
-                                    return Ok(Validation::Invalid(
-                                        "This field is required.".into(),
-                                    ));
-                                }
-                                match Url::parse(input) {
-                                    Ok(_) => Ok(Validation::Valid),
-                                    Err(_) => Ok(Validation::Invalid(
-                                        "Please enter a valid URL.".into(),
-                                    )),
-                                }
-                            })
-                            .with_formatter(&format_slash)
-                            .prompt_skippable()
-                            .expect("Failed to show prompt!") {
+                                .with_initial_value(serv.server_endpoint.as_str())
+                                .with_validator(|input: &str| {
+                                    if input.trim().is_empty() {
+                                        return Ok(Validation::Invalid(
+                                            "This field is required.".into(),
+                                        ));
+                                    }
+                                    match Url::parse(input) {
+                                        Ok(_) => Ok(Validation::Valid),
+                                        Err(_) => Ok(Validation::Invalid(
+                                            "Please enter a valid URL.".into(),
+                                        )),
+                                    }
+                                })
+                                .with_formatter(&format_slash)
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!") {
                                 Some(x) => {
                                     serv.server_endpoint = x;
                                     PromptResult::Ok
@@ -2927,16 +3381,16 @@ impl UiApp {
                                 .with_predefined_text(&serv.server_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!") {
-                                    Some(x) => {
-                                        serv.server_password = if x.is_empty() {
-                                            None
-                                        } else {
-                                            Some(x.trim().to_string())
-                                        };
-                                        PromptResult::Ok
-                                    },
-                                    None => PromptResult::Cancel
-                                }
+                                Some(x) => {
+                                    serv.server_password = if x.is_empty() {
+                                        None
+                                    } else {
+                                        Some(x.trim().to_string())
+                                    };
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
                         },
                         |x| {
                             x.server_password
@@ -2953,16 +3407,16 @@ impl UiApp {
                                 .with_initial_value(&serv.user_name.clone().unwrap_or("".into()))
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!") {
-                                    Some(x) => {
-                                        serv.user_name = if x.is_empty() {
-                                            None
-                                        } else {
-                                            Some(x.trim().to_string())
-                                        };
-                                        PromptResult::Ok
-                                    },
-                                    None => PromptResult::Cancel
-                                }
+                                Some(x) => {
+                                    serv.user_name = if x.is_empty() {
+                                        None
+                                    } else {
+                                        Some(x.trim().to_string())
+                                    };
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
                         },
                         |x| x.user_name.clone().unwrap_or("[EMPTY]".to_string()),
                     ),
@@ -2974,16 +3428,16 @@ impl UiApp {
                                 .with_initial_value(&serv.user_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!") {
-                                    Some(x) => {
-                                        serv.user_password = if x.is_empty() {
-                                            None
-                                        } else {
-                                            Some(x.trim().to_string())
-                                        };
-                                        PromptResult::Ok
-                                    },
-                                    None => PromptResult::Cancel
-                                }
+                                Some(x) => {
+                                    serv.user_password = if x.is_empty() {
+                                        None
+                                    } else {
+                                        Some(x.trim().to_string())
+                                    };
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
                         },
                         |x| {
                             x.user_password
@@ -3021,16 +3475,16 @@ impl UiApp {
                                 .with_initial_value(&serv.arduino_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!") {
-                                    Some(x) => {
-                                        serv.arduino_password = if x.is_empty() {
-                                            None
-                                        } else {
-                                            Some(x.trim().to_string())
-                                        };
-                                        PromptResult::Ok
-                                    },
-                                    None => PromptResult::Cancel
-                                }
+                                Some(x) => {
+                                    serv.arduino_password = if x.is_empty() {
+                                        None
+                                    } else {
+                                        Some(x.trim().to_string())
+                                    };
+                                    PromptResult::Ok
+                                },
+                                None => PromptResult::Cancel
+                            }
                         },
                         |x| {
                             x.arduino_password
@@ -3074,36 +3528,36 @@ impl UiApp {
                 ],
                 Box::new(|ctx| Ok(ctx.api.expect("Expected DB to be valid!").get_all_servers_sync()?)),
             )
-            .with_select_title(format!(
-                "Neptis Front End v{}\nCopyright (c) 2025 Eric E. Gold\nThis software is licensed under GPLv3\n",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .with_modify(Box::new(|ctx, servers, serv| {
-                let mut m_servers = servers.clone();
-                if serv.is_default {
-                    for server in m_servers.iter_mut() {
-                        // Overwrite default status for other servers.
-                        server.is_default = false;
+                .with_select_title(format!(
+                    "Neptis Front End v{}\nCopyright (c) 2025 Eric E. Gold\nThis software is licensed under GPLv3\n",
+                    env!("CARGO_PKG_VERSION")
+                ))
+                .with_modify(Box::new(|ctx, servers, serv| {
+                    let mut m_servers = servers.clone();
+                    if serv.is_default {
+                        for server in m_servers.iter_mut() {
+                            // Overwrite default status for other servers.
+                            server.is_default = false;
+                        }
                     }
-                }
 
-                if let Some(u_serv) = m_servers
-                    .iter_mut()
-                    .find(|x| x.server_name == serv.server_name.as_str())
-                {
-                    *u_serv = serv.clone();
-                } else {
-                    m_servers.push(serv.clone());
-                }
-                Ok(ctx.api.expect("Expected DB to be valid!").overwrite_servers_sync(m_servers.as_slice())?)
-            }))
-            .with_delete(Box::new(|ctx, x| {
-                Ok(ctx.api.expect("Expected DB to be valid!").delete_server_sync(x.server_name.as_str())?)
-            }))
-            .do_display()
-            .expect("Failed to show information!")
-            .expect("Expected server to be selected!"),
-            false
+                    if let Some(u_serv) = m_servers
+                        .iter_mut()
+                        .find(|x| x.server_name == serv.server_name.as_str())
+                    {
+                        *u_serv = serv.clone();
+                    } else {
+                        m_servers.push(serv.clone());
+                    }
+                    Ok(ctx.api.expect("Expected DB to be valid!").overwrite_servers_sync(m_servers.as_slice())?)
+                }))
+                .with_delete(Box::new(|ctx, x| {
+                    Ok(ctx.api.expect("Expected DB to be valid!").delete_server_sync(x.server_name.as_str())?)
+                }))
+                .do_display()
+                .expect("Failed to show information!")
+                .expect("Expected server to be selected!"),
+            false,
         );
     }
 
@@ -3117,6 +3571,7 @@ impl UiApp {
             fuse: Mutex::new(None),
             db,
             mnt,
+            server: RwLock::new(None),
         }
     }
 
@@ -3127,12 +3582,16 @@ impl UiApp {
         UiApp {
             rt: rt.clone(),
             api: Arc::new(RwLock::new(None)),
+            server: RwLock::new(None),
             db,
         }
     }
 }
 
+use crate::ui::browser::FileBrowserMode;
 use clap::{ArgGroup, Parser};
+use inquire::formatter::StringFormatter;
+use itertools::Itertools;
 
 #[derive(Parser, Debug)]
 #[command(name = "Neptis")]

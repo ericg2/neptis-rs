@@ -20,11 +20,48 @@ pub struct FileBrowser {
     fs: NeptisFS,
 }
 
+pub enum FileBrowserMode {
+    Normal,
+    SelectFile,
+    SelectFolder,
+    SelectFileRW,
+    SelectFolderRW,
+}
+
 const BUFFER_BYTES: u64 = 16_000_000;
 
 impl FileBrowser {
     pub fn new(fs: impl Into<NeptisFS>) -> Self {
         FileBrowser { fs: fs.into() }
+    }
+
+    pub fn rel_path_to_smb<P: AsRef<Path>, S: AsRef<str>>(
+        user_name: S,
+        point_name: S,
+        rel_path: P,
+    ) -> PathBuf {
+        let smb_data = format!("{}-{}-data", user_name.as_ref(), point_name.as_ref());
+        let smb_repo = format!("{}-{}-repo", user_name.as_ref(), point_name.as_ref());
+        let path = rel_path.as_ref();
+
+        let mut components = path.components();
+        let mut new_path = PathBuf::new();
+
+        if let Some(first) = components.next() {
+            let first_str = first.as_os_str();
+            if first_str == "data" {
+                new_path.push(smb_data);
+            } else if first_str == "repo" {
+                new_path.push(smb_repo);
+            } else {
+                new_path.push(first_str);
+            }
+        }
+
+        for component in components {
+            new_path.push(component);
+        }
+        new_path
     }
 
     pub fn is_read_only(&self, path: &Path) -> bool {
@@ -260,10 +297,12 @@ impl FileBrowser {
         }
     }
 
-    pub fn show_browser(&self) {
+    pub fn show_browser(&self, mode: FileBrowserMode) -> Option<PathBuf> {
         // Start at the root directory and show everything
         let mut sel_path = PathBuf::from("/");
         const STR_RO_SELECT: &'static str = "Select";
+        const STR_RO_FINAL_FOLDER: &'static str = "Use This Folder";
+        const STR_RO_FINAL_FILE: &'static str = "Use This File";
         const STR_RO_STAT: &'static str = "Stats";
         const STR_RO_SAVE: &'static str = "Download";
         const STR_RW_EDIT: &'static str = "Edit";
@@ -386,7 +425,11 @@ impl FileBrowser {
             clearscreen::clear().expect("Failed to clear screen!");
             match self.fs.do_readdir(&sel_path).map(|x| {
                 x.into_iter()
-                    .filter(|x| x.path != PathBuf::from(".") && x.path != PathBuf::from(".."))
+                    .filter(|x| {
+                        x.path != PathBuf::from(".")
+                            && x.path != PathBuf::from("..")
+                            && x.path.to_str().unwrap().trim() != ""
+                    })
                     .sorted_by(|a, b| {
                         match (
                             a.attr.kind == GenericFileType::Directory,
@@ -417,7 +460,14 @@ impl FileBrowser {
                     .collect::<IndexMap<_, _>>()
             }) {
                 Some(ret) => {
-                    let title = format!("Current Path: {}", sel_path.to_str().unwrap());
+                    let mut title = format!("Current Path: {}", sel_path.to_str().unwrap().replace("\\", "/"));
+                    title += match mode {
+                        FileBrowserMode::Normal => "",
+                        FileBrowserMode::SelectFile => "\nPlease select any file.",
+                        FileBrowserMode::SelectFolder => "\nPlease select any folder.",
+                        FileBrowserMode::SelectFileRW => "\nPlease select an R/W file.",
+                        FileBrowserMode::SelectFolderRW => "\nPlease select an R/W folder.",
+                    };
                     match Select::new(&title, {
                         let is_rw = !self.is_read_only(&sel_path);
                         let mut keys = ret
@@ -448,12 +498,44 @@ impl FileBrowser {
                                 let full_path = sel_path.join(f_node.path.clone());
                                 let is_rw = !self.is_read_only(&full_path);
                                 match Select::new(
-                                    &format!("Select action for {}", full_path.to_str().unwrap()),
+                                    &format!("Select action for {}", full_path.to_str().unwrap().replace("\\", "/")),
                                     {
                                         let mut actions = vec![];
                                         if f_node.attr.kind == GenericFileType::Directory {
                                             actions.push(STR_RO_SELECT);
                                         }
+
+                                        match mode {
+                                            FileBrowserMode::SelectFile => {
+                                                if f_node.attr.kind == GenericFileType::RegularFile
+                                                {
+                                                    actions.push(STR_RO_FINAL_FILE);
+                                                }
+                                            }
+                                            FileBrowserMode::SelectFolder => {
+                                                if f_node.attr.kind == GenericFileType::Directory {
+                                                    actions.push(STR_RO_FINAL_FOLDER);
+                                                }
+                                            }
+                                            FileBrowserMode::SelectFileRW => {
+                                                if is_rw
+                                                    && f_node.attr.kind
+                                                        == GenericFileType::RegularFile
+                                                {
+                                                    actions.push(STR_RO_FINAL_FILE);
+                                                }
+                                            }
+                                            FileBrowserMode::SelectFolderRW => {
+                                                if is_rw
+                                                    && f_node.attr.kind
+                                                        == GenericFileType::Directory
+                                                {
+                                                    actions.push(STR_RO_FINAL_FOLDER);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+
                                         actions.push(STR_RO_STAT);
                                         if f_node.attr.kind == GenericFileType::RegularFile {
                                             actions.push(STR_RO_SAVE);
@@ -488,6 +570,8 @@ impl FileBrowser {
                                 .map(|x| if x == STR_BACK { None } else { Some(x) })
                                 .flatten()
                                 {
+                                    Some(STR_RO_FINAL_FOLDER) => return Some(full_path),
+                                    Some(STR_RO_FINAL_FILE) => return Some(full_path),
                                     Some(STR_RO_SAVE) => self.do_download(f_node, &full_path),
                                     Some(STR_RO_STAT) => self.do_stats(f_node, &full_path),
                                     Some(STR_RW_DELETE) => self.do_delete(&full_path),
@@ -510,7 +594,18 @@ impl FileBrowser {
                                     sel_path = x;
                                     continue;
                                 }
-                                None => break,
+                                None => {
+                                    if Confirm::new("Are you sure you want to leave the browser? This will cancel all pending actions!")
+                                        .with_default(false)
+                                        .prompt_skippable()
+                                        .expect("Failed to show prompt!")
+                                        .map(|x|if !x { None } else { Some(x) })
+                                        .is_none() {
+                                        break;
+                                    } else {
+                                        continue;
+                                    }
+                                },
                             }
                         }
                     }
@@ -527,5 +622,6 @@ impl FileBrowser {
                 }
             }
         }
+        None
     }
 }

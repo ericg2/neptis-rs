@@ -200,14 +200,14 @@ impl NeptisFS {
             attr: Self::generic_dir_attr(),
         });
 
-        let p_str = path.to_str().unwrap();
+        let p_str = path.to_str().unwrap().replace("\\", "/");
         let ret = {
             if let Some(x) = self.cache_lookup.get(path) {
                 Some(x)
             } else {
                 let m_api = &*self.api.read().unwrap();
                 if let Some(api) = m_api {
-                    if let Ok(entries) = self.rt.block_on(async { api.browse_file(p_str).await }) {
+                    if let Ok(entries) = self.rt.block_on(async { api.browse_file(&p_str).await }) {
                         let mut map: HashMap<PathBuf, Vec<FsNode>> = HashMap::new();
                         let mut ret = None;
                         for (k, v) in entries
@@ -273,7 +273,7 @@ impl NeptisFS {
                     if let Some(api) = m_api {
                         self.rt.block_on(async move {
                             api.dump_file(
-                                path.to_str().unwrap(),
+                                &path.to_str().unwrap().replace("\\", "/"),
                                 Some(offset),
                                 if size == usize::MAX {
                                     None
@@ -316,9 +316,9 @@ impl NeptisFS {
             if let Some(api) = m_api {
                 self.rt.block_on(async move {
                     api.put_file(PutForFileApi {
-                        path: path.to_str().unwrap().to_owned(),
+                        path: path.to_str().unwrap().replace("\\", "/"),
                         base64: data.map(|x| BASE64_STANDARD.encode(x)),
-                        new_path: new_path.map(|x| x.to_str().unwrap().to_owned()),
+                        new_path: new_path.map(|x| x.to_str().unwrap().replace("\\", "/")),
                         atime: atime.map(|x| to_dto_time!(x)),
                         mtime: mtime.map(|x| to_dto_time!(x)),
                         offset: offset,
@@ -344,7 +344,7 @@ impl NeptisFS {
             if let Some(api) = m_api {
                 self.rt.block_on(async move {
                     api.post_file(PostForFileApi {
-                        path: path.to_str().unwrap().to_owned(),
+                        path: path.to_str().unwrap().replace("\\", "/"),
                         base64: None,
                         offset: None,
                         is_dir,
@@ -365,7 +365,7 @@ impl NeptisFS {
             let m_api = &*self.api.read().unwrap();
             if let Some(api) = m_api {
                 self.rt
-                    .block_on(async move { api.delete_file(path.to_str().unwrap()).await.ok() })
+                    .block_on(async move { api.delete_file(&path.to_str().unwrap().replace("\\", "/")).await.ok() })
             } else {
                 None
             }

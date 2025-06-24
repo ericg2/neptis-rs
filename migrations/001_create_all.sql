@@ -17,17 +17,17 @@ CREATE TABLE transfer_auto_schedules
     schedule_name TEXT NOT NULL,
     server_name   TEXT NOT NULL,
     cron_schedule TEXT NOT NULL,
-    PRIMARY KEY (schedule_name)
+    smb_user_name TEXT NOT NULL,
+    smb_password  TEXT NOT NULL,
+    PRIMARY KEY (schedule_name, server_name)
 );
 
 CREATE TABLE transfer_auto_jobs
 (
-    id            TEXT NOT NULL,
-    batch_id      TEXT NOT NULL,
     schedule_name TEXT NOT NULL,
-    smb_user_name TEXT NOT NULL,
-    smb_password  TEXT NOT NULL,
+    server_name   TEXT NOT NULL,
+    action_name   TEXT NOT NULL,
     smb_folder    TEXT NOT NULL,
     local_folder  TEXT NOT NULL,
-    PRIMARY KEY (id)
+    PRIMARY KEY (schedule_name, server_name, action_name)
 );

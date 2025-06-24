@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM transfer_auto_jobs WHERE schedule_name = ? AND server_name = ? AND action_name = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "94284014606fedf05284161889eab4466382525b4f3658db221bdf773fe94f08"
+}
