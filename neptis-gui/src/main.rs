@@ -661,7 +661,7 @@ impl UiApp {
                         "Please enter SMB Password",
                     )
                     .with_validator(required!())
-                    .with_default(&dto.smb_password)
+                    .with_initial_value(&dto.smb_password)
                     .prompt_skippable()
                     .expect("Failed to show prompt!")
                     {
@@ -728,7 +728,7 @@ impl UiApp {
                     .collect::<Vec<_>>();
 
                 let mut final_password = dto.smb_password.clone();
-                if !all_passwords.contains(&dto.smb_password) {
+                if all_passwords.len() > 0 && !all_passwords.contains(&dto.smb_password) {
                     all_passwords.push(STR_CHANGE_ALL.into());
                     all_passwords.push(STR_ACCEPT.into());
 
@@ -2641,13 +2641,7 @@ impl UiApp {
                         .expect("Failed to show prompt!")
                         .unwrap_or(false)
                 {
-                    let d_path = self.mnt.clone().unwrap_or(format!(
-                        "{}/.neptis/mnt",
-                        dirs_next::home_dir()
-                            .expect("Expected home directory!")
-                            .to_str()
-                            .expect("Expected directory to parse!")
-                    ));
+                    let d_path = self.mnt.clone().unwrap_or(get_working_dir().to_str().unwrap().to_string());
                     if auto && !d_path.is_empty() {
                         unmount_if_stale(&d_path);
                         match (|| {
@@ -3576,9 +3570,9 @@ impl UiApp {
     }
 
     #[cfg(not(unix))]
-    pub fn new(db_path: Option<String>) -> UiApp {
+    pub fn new() -> UiApp {
         let rt = Arc::new(Runtime::new().expect("Expected Runtime to start!"));
-        let db = DbController::new_default(rt.clone(), db_path);
+        let db = DbController::new(rt.clone());
         UiApp {
             rt: rt.clone(),
             api: Arc::new(RwLock::new(None)),
@@ -3592,14 +3586,12 @@ use crate::ui::browser::FileBrowserMode;
 use clap::{ArgGroup, Parser};
 use inquire::formatter::StringFormatter;
 use itertools::Itertools;
+use neptis_lib::get_working_dir;
 
 #[derive(Parser, Debug)]
 #[command(name = "Neptis")]
 #[command(about = "Neptis Front End", long_about = None)]
 pub struct CliArgs {
-    #[arg(long = "db", value_name = "PATH", env = "NEPTIS_DB")]
-    pub db: Option<String>,
-
     /// Prevent updates from running
     #[arg(long = "no-update")]
     pub no_update: Option<bool>,
@@ -3649,7 +3641,7 @@ pub fn main() {
     let app = UiApp::new(args.db, args.default_fuse);
 
     #[cfg(not(unix))]
-    let app = UiApp::new(args.db);
+    let app = UiApp::new();
 
     app.begin();
 }

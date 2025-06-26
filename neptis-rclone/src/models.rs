@@ -56,8 +56,9 @@ pub struct RCloneStat {
 }
 
 pub struct TransferJob {
+    
     pub job_id: Uuid,
-    pub batch_id: Uuid,
+    pub auto_job: Option<String>,
     pub server: ServerItem,
     pub smb_user_name: String,
     pub smb_password: String,
@@ -72,6 +73,22 @@ pub struct TransferJob {
     pub _thread: Option<JoinHandle<()>>,
     pub _cancel_tx: Option<Sender<()>>,
     pub _cancel_rx: Option<Receiver<bool>>,
+}
+
+pub struct TransferJobInternalDto {
+    pub job_id: Uuid,
+    pub auto_job: Option<String>,
+    pub server_name: String,
+    pub smb_user_name: String,
+    pub smb_password: String,
+    pub smb_folder: String,
+    pub local_folder: String,
+    pub last_stats: Option<RCloneStat>,
+    pub start_date: Option<NaiveDateTime>,
+    pub end_date: Option<NaiveDateTime>,
+    pub fatal_errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub last_updated: NaiveDateTime,
 }
 
 impl TransferJob {

@@ -1,30 +1,50 @@
-use crate::rclone::{RCloneClient, RCloneJobLaunchInfo, RCloneSettings};
+use crate::rclone::{RCloneClient, RCloneSettings};
 use neptis_lib::prelude::DbController;
+use rocket::{build, catch, catchers};
 use std::sync::Arc;
+use std::thread;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 
-mod dtos;
 mod errors;
 mod macros;
 mod models;
 mod rclone;
+mod api;
 
-fn main() {
+#[rocket::launch]
+fn rocket() -> _ {
     let rt = Arc::new(Runtime::new().unwrap());
-    let settings = RCloneSettings::new("C:\\Users\\Eric\\rclone");
-    let db = Arc::new(DbController::new_default(rt, None));
-    let mut client = RCloneClient::new_owned(settings, db);
-
-    let batch_id = client
-        .create_batch(vec![RCloneJobLaunchInfo {
-            server_name: "192.168.1.149".into(),
-            smb_user_name: "eric-smb".into(),
-            smb_password: "Rugratse124!".into(),
-            local_folder: "C:\\Users\\Eric\\Downloads\\test".into(),
-            smb_folder: "eric-storage-data/Downloads".into(),
-        }])
-        .unwrap();
-    client.start_batch(batch_id).unwrap();
-    loop {}
+    let settings = RCloneSettings::new(neptis_lib::get_working_dir());
+    let db = Arc::new(DbController::new(rt));
+    let client = Arc::new(RCloneClient::new_owned(settings, db));
+    
+    rocket::build()
+        .manage(client.clone())
+        .register("/", catchers![not_found, unauthorized])
+        .attach(rocket::fairing::AdHoc::on_liftoff("Test", move |_| {
+            let nb_clone = client.clone();
+            Box::pin(async move {
+                let _ = thread::spawn(move || {
+                    nb_clone.handle_blocking();
+                });
+            })
+        }))
 }
+
+#[catch(404)]
+fn not_found() -> &'static str {
+    "Not Found"
+}
+
+#[catch(401)]
+fn unauthorized() -> &'static str {
+    "Unauthorized"
+}
+
+// fn main() {
+//     let rt = Arc::new(Runtime::new().unwrap());
+//     let settings = RCloneSettings::new(neptis_lib::get_working_dir());
+//     let db = Arc::new(DbController::new(rt));
+//     let mut client = RCloneClient::new_owned(settings, db);
+// }

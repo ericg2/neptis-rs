@@ -35,35 +35,6 @@ impl FileBrowser {
         FileBrowser { fs: fs.into() }
     }
 
-    pub fn rel_path_to_smb<P: AsRef<Path>, S: AsRef<str>>(
-        user_name: S,
-        point_name: S,
-        rel_path: P,
-    ) -> PathBuf {
-        let smb_data = format!("{}-{}-data", user_name.as_ref(), point_name.as_ref());
-        let smb_repo = format!("{}-{}-repo", user_name.as_ref(), point_name.as_ref());
-        let path = rel_path.as_ref();
-
-        let mut components = path.components();
-        let mut new_path = PathBuf::new();
-
-        if let Some(first) = components.next() {
-            let first_str = first.as_os_str();
-            if first_str == "data" {
-                new_path.push(smb_data);
-            } else if first_str == "repo" {
-                new_path.push(smb_repo);
-            } else {
-                new_path.push(first_str);
-            }
-        }
-
-        for component in components {
-            new_path.push(component);
-        }
-        new_path
-    }
-
     pub fn is_read_only(&self, path: &Path) -> bool {
         let mut parts = path.components().filter_map(|c| match c {
             Component::Normal(p) => p.to_str(),

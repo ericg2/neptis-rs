@@ -18,11 +18,3 @@ pub struct TransferAutoJob {
     pub local_folder: String,
 }
 
-// #[derive(Serialize, Deserialize, Clone, Default)]
-// struct InternalTransferAutoJob {
-//     id: String,
-//     smb_user_name: String,
-//     smb_password: String,
-//     smb_folder: String,
-//     local_folder: String,
-// }

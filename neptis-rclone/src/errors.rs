@@ -19,7 +19,7 @@ pub enum ValidateError {
 }
 
 #[derive(Debug, Error)]
-pub enum NeptisError {
+pub enum ApiError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
 
@@ -40,28 +40,32 @@ pub enum NeptisError {
 
     #[error(transparent)]
     Archive(#[from] zip::result::ZipError),
+    
+    #[error(transparent)]
+    Sql(#[from] sqlx::Error),
 
     #[error("A timeout error has occurred.")]
     Timeout,
 }
 
-impl NeptisError {
+impl ApiError {
     pub fn enum_not_found(msg: String) -> Self {
         Self::InternalError(msg)
     }
 }
 
-impl<'r> Responder<'r, 'static> for NeptisError {
+impl<'r> Responder<'r, 'static> for ApiError {
     fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'static> {
         let status = match self {
-            NeptisError::InternalError(_) => Status::InternalServerError,
-            NeptisError::BadRequest(_) => Status::BadRequest,
-            NeptisError::Unauthorized(_) => Status::Unauthorized,
-            NeptisError::Validation(_) => Status::BadRequest,
-            NeptisError::Timeout => Status::RequestTimeout,
-            NeptisError::IoError(_) => Status::InternalServerError,
-            NeptisError::Reqwest(_) => Status::InternalServerError,
-            NeptisError::Archive(_) => Status::InternalServerError,
+            ApiError::InternalError(_) => Status::InternalServerError,
+            ApiError::BadRequest(_) => Status::BadRequest,
+            ApiError::Unauthorized(_) => Status::Unauthorized,
+            ApiError::Validation(_) => Status::BadRequest,
+            ApiError::Timeout => Status::RequestTimeout,
+            ApiError::IoError(_) => Status::InternalServerError,
+            ApiError::Reqwest(_) => Status::InternalServerError,
+            ApiError::Archive(_) => Status::InternalServerError,
+            ApiError::Sql(_) => Status::InternalServerError,
         };
         status::Custom(status, json!({"error": self.to_string()})).respond_to(request)
     }

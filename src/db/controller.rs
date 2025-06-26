@@ -9,7 +9,7 @@ use sqlx::{
 };
 use tokio::runtime::Runtime;
 use uuid::Uuid;
-
+use crate::get_working_dir;
 use super::server::ServerItem;
 use crate::prelude::{TransferAutoJob, TransferAutoSchedule};
 
@@ -343,25 +343,8 @@ impl DbController {
         })
     }
 
-    fn get_db(db_path: Option<String>) -> String {
-        if let Some(b_dir) = dirs_next::home_dir().map(|x| x.join(".neptis")) {
-            if !b_dir.exists() {
-                fs::create_dir_all(b_dir).expect("Failed to create Neptis directory!");
-            }
-        }
-        db_path.clone()
-            .or(
-                dirs_next::home_dir()
-                    .map(|x|x.join(".neptis/neptis.db").to_str().unwrap().to_string()))
-            .expect("Failed to find database location! Please set 'NEPTIS_DB' to a path, or use a user account with a home directory.")
-    }
-
-    pub fn new_default(rt: Arc<Runtime>, db_path: Option<String>) -> Self {
-        Self::new(rt, &Self::get_db(db_path))
-    }
-
-    pub fn new(rt: Arc<Runtime>, path: &str) -> Self {
-        let url = format!("sqlite://{}", path);
+    pub fn new(rt: Arc<Runtime>) -> Self {
+        let url = format!("sqlite://{}", get_working_dir().join("neptis.db").to_str().unwrap());
         Self {
             rt: rt.clone(),
             pool: {
