@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
 use std::fs;
 use std::path::Path;
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone, Default, FromRow)]
 pub struct ServerItem {

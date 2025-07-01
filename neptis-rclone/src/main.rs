@@ -1,6 +1,6 @@
 use crate::rclone::{RCloneClient, RCloneSettings};
 use neptis_lib::prelude::DbController;
-use rocket::{build, catch, catchers};
+use rocket::{catch, catchers};
 use std::sync::Arc;
 use std::thread;
 use tokio::io::AsyncWriteExt;
@@ -8,16 +8,16 @@ use tokio::runtime::Runtime;
 
 mod errors;
 mod macros;
-mod models;
 mod rclone;
 mod api;
+mod schema;
 
 #[rocket::launch]
 fn rocket() -> _ {
     let rt = Arc::new(Runtime::new().unwrap());
     let settings = RCloneSettings::new(neptis_lib::get_working_dir());
     let db = Arc::new(DbController::new(rt));
-    let client = Arc::new(RCloneClient::new_owned(settings, db));
+    let client = Arc::new(RCloneClient::new(settings, db));
     
     rocket::build()
         .manage(client.clone())
@@ -41,10 +41,3 @@ fn not_found() -> &'static str {
 fn unauthorized() -> &'static str {
     "Unauthorized"
 }
-
-// fn main() {
-//     let rt = Arc::new(Runtime::new().unwrap());
-//     let settings = RCloneSettings::new(neptis_lib::get_working_dir());
-//     let db = Arc::new(DbController::new(rt));
-//     let mut client = RCloneClient::new_owned(settings, db);
-// }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM transfer_jobs_internal WHERE job_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "0747f86b417f7197f1aed15d42df8f7c498c3781cbbf320dfba3786519e6c89d"
+}

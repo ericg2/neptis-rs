@@ -45,7 +45,7 @@ flume = "0.11"
 itertools = "0.14"
 indexmap = "2"
 axoupdater = { version = "0.9", features = ["blocking"] }
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros", "migrate", "uuid", "chrono"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros", "migrate", "uuid", "chrono", "json"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 reqwest-retry = "0.7"
 reqwest-middleware = "0.4"

@@ -751,6 +751,7 @@ impl UiApp {
                                     .1
                                     .clone()
                                     .ok_or(NeptisError::Str("Failed to find username!".into()))?,
+                                date_created: Utc::now().into()
                             })?
                         }
                     } else if ret != STR_ACCEPT {
@@ -768,6 +769,7 @@ impl UiApp {
                             .1
                             .clone()
                             .ok_or(NeptisError::Str("Failed to find username!".into()))?,
+                        date_created: Utc::now().into(),
                     })?)
             }
         }))

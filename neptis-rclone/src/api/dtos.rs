@@ -1,8 +1,7 @@
-﻿use crate::models::{TransferJobStatus, RCloneStat, TransferJob};
-use chrono::NaiveDateTime;
+﻿use chrono::NaiveDateTime;
+use neptis_lib::db::sync_models::{RCloneStat, TransferJob, TransferJobStatus};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use neptis_lib::prelude::ServerItem;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TransferJobDto {
@@ -27,24 +26,19 @@ pub struct PostForAutoScheduleStartDto {
 impl <T: AsRef<TransferJob>> From<T> for TransferJobDto {
     fn from(job: T) -> Self {
         let job_ref = job.as_ref();
+        let job_dto = &job_ref.dto;
         let stat = job_ref.status();
         TransferJobDto {
-            job_id: job_ref.job_id.clone(),
-            server_name: job_ref.server.server_name.clone(),
-            smb_folder: job_ref.smb_folder.clone(),
-            local_folder: job_ref.local_folder.clone(),
-            errors: job_ref.fatal_errors.clone(),
-            last_stats: job_ref.last_stats.clone(),
-            start_date: job_ref.start_date.clone(),
-            end_date: job_ref.end_date.clone(),
-            last_updated: job_ref.last_updated.clone(),
+            job_id: job_dto.job_id.clone(),
+            server_name: job_dto.server_name.clone(),
+            smb_folder: job_dto.smb_folder.clone(),
+            local_folder: job_dto.local_folder.clone(),
+            errors: job_dto.fatal_errors.0.clone(),
+            last_stats: job_dto.last_stats.clone().map(|x|x.0),
+            start_date: job_dto.start_date.clone(),
+            end_date: job_dto.end_date.clone(),
+            last_updated: job_dto.last_updated.clone(),
             stat
         }
-    }
-}
-
-impl AsRef<TransferJob> for TransferJob {
-    fn as_ref(&self) -> &TransferJob {
-        self
     }
 }

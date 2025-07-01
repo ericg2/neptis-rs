@@ -1,10 +1,34 @@
-﻿use chrono::NaiveDateTime;
-use neptis_lib::prelude::ServerItem;
-use rocket::serde::Serialize;
-use serde::Deserialize;
-use std::sync::mpsc::{Receiver, Sender};
+﻿use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
-use uuid::Uuid;
+use chrono::{DateTime, FixedOffset, NaiveDateTime};
+use serde::{Deserialize, Serialize};
+use crate::prelude::TransferJobInternalDto;
+
+impl From<TransferJob> for TransferJobInternalDto {
+    fn from(value: TransferJob) -> Self {
+        value.dto
+    }
+}
+
+// const FAIL_MESSAGE: &'static str =
+//     "Job cannot be recovered due to server data loss. Did it restart?";
+
+impl From<TransferJobInternalDto> for TransferJob {
+    fn from(value: TransferJobInternalDto) -> Self {
+        TransferJob {
+            dto: value,
+            _thread: None,
+            _cancel_rx: None,
+            _cancel_tx: None,
+        } // todo: add something for fail message here?
+    }
+}
+
+impl AsRef<TransferJob> for TransferJob {
+    fn as_ref(&self) -> &TransferJob {
+        self
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -32,7 +56,7 @@ pub struct RCloneMessage {
     pub level: RCloneLogLevel,
     pub msg: String,
     pub stats: RCloneStat,
-    pub time: NaiveDateTime,
+    pub time: DateTime<FixedOffset>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,48 +80,19 @@ pub struct RCloneStat {
 }
 
 pub struct TransferJob {
-    
-    pub job_id: Uuid,
-    pub auto_job: Option<String>,
-    pub server: ServerItem,
-    pub smb_user_name: String,
-    pub smb_password: String,
-    pub smb_folder: String,
-    pub local_folder: String,
-    pub last_stats: Option<RCloneStat>,
-    pub start_date: Option<NaiveDateTime>,
-    pub end_date: Option<NaiveDateTime>,
-    pub fatal_errors: Vec<String>,
-    pub warnings: Vec<String>,
-    pub last_updated: NaiveDateTime,
+    pub dto: TransferJobInternalDto,
     pub _thread: Option<JoinHandle<()>>,
     pub _cancel_tx: Option<Sender<()>>,
     pub _cancel_rx: Option<Receiver<bool>>,
-}
-
-pub struct TransferJobInternalDto {
-    pub job_id: Uuid,
-    pub auto_job: Option<String>,
-    pub server_name: String,
-    pub smb_user_name: String,
-    pub smb_password: String,
-    pub smb_folder: String,
-    pub local_folder: String,
-    pub last_stats: Option<RCloneStat>,
-    pub start_date: Option<NaiveDateTime>,
-    pub end_date: Option<NaiveDateTime>,
-    pub fatal_errors: Vec<String>,
-    pub warnings: Vec<String>,
-    pub last_updated: NaiveDateTime,
 }
 
 impl TransferJob {
     pub fn status(&self) -> TransferJobStatus {
         if self._thread.is_some() {
             TransferJobStatus::Running
-        } else if self.fatal_errors.len() > 0 {
+        } else if self.dto.fatal_errors.len() > 0 {
             TransferJobStatus::Failed
-        } else if self.last_stats.is_none() {
+        } else if self.dto.last_stats.is_none() {
             TransferJobStatus::NotStarted
         } else {
             TransferJobStatus::Successful

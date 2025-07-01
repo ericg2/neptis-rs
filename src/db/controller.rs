@@ -1,6 +1,9 @@
 use std::fs;
 use std::sync::Arc;
 
+use super::server::ServerItem;
+use crate::get_working_dir;
+use crate::prelude::{TransferAutoJob, TransferAutoSchedule, TransferJobInternalDto};
 use sqlx::{
     Sqlite, SqlitePool,
     migrate::MigrateDatabase,
@@ -9,9 +12,6 @@ use sqlx::{
 };
 use tokio::runtime::Runtime;
 use uuid::Uuid;
-use crate::get_working_dir;
-use super::server::ServerItem;
-use crate::prelude::{TransferAutoJob, TransferAutoSchedule};
 
 pub struct DbController {
     rt: Arc<Runtime>,
@@ -343,8 +343,146 @@ impl DbController {
         })
     }
 
+    pub async fn save_transfer_job_internal(
+        &self,
+        job: &TransferJobInternalDto,
+    ) -> Result<(), sqlx::Error> {
+        let last_stats_json = match &job.last_stats {
+            Some(s) => {
+                Some(serde_json::to_string(s).map_err(|e| sqlx::Error::Decode(Box::new(e)))?)
+            }
+            None => None,
+        };
+        let fatal_errors_json = serde_json::to_string(&job.fatal_errors)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        let warnings_json =
+            serde_json::to_string(&job.warnings).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+
+        if sqlx::query!(
+            r#"
+        UPDATE transfer_jobs_internal
+        SET
+            auto_job = ?,
+            server_name = ?,
+            smb_user_name = ?,
+            smb_password = ?,
+            smb_folder = ?,
+            local_folder = ?,
+            last_stats = ?,
+            start_date = ?,
+            end_date = ?,
+            fatal_errors = ?,
+            warnings = ?,
+            last_updated = ?
+        WHERE
+            job_id = ?
+        "#,
+            job.auto_job,
+            job.server_name,
+            job.smb_user_name,
+            job.smb_password,
+            job.smb_folder,
+            job.local_folder,
+            last_stats_json,
+            job.start_date,
+            job.end_date,
+            fatal_errors_json,
+            warnings_json,
+            job.last_updated,
+            job.job_id,
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected()
+            == 0
+        {
+            sqlx::query!(
+                r#"
+            INSERT INTO transfer_jobs_internal (
+                job_id,
+                auto_job,
+                server_name,
+                smb_user_name,
+                smb_password,
+                smb_folder,
+                local_folder,
+                last_stats,
+                start_date,
+                end_date,
+                fatal_errors,
+                warnings,
+                last_updated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+                job.job_id,
+                job.auto_job,
+                job.server_name,
+                job.smb_user_name,
+                job.smb_password,
+                job.smb_folder,
+                job.local_folder,
+                last_stats_json,
+                job.start_date,
+                job.end_date,
+                fatal_errors_json,
+                warnings_json,
+                job.last_updated,
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    pub fn save_transfer_job_internal_sync(
+        &self,
+        job: &TransferJobInternalDto,
+    ) -> Result<(), sqlx::Error> {
+        self.rt
+            .block_on(async move { self.save_transfer_job_internal(job).await })
+    }
+
+    pub async fn get_all_transfer_jobs_internal(
+        &self,
+    ) -> Result<Vec<TransferJobInternalDto>, sqlx::Error> {
+        let results = sqlx::query_as::<_, TransferJobInternalDto>(
+            r#"
+            SELECT * FROM transfer_jobs_internal
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(results)
+    }
+
+    pub fn get_all_transfer_jobs_internal_sync(
+        &self,
+    ) -> Result<Vec<TransferJobInternalDto>, sqlx::Error> {
+        self.rt
+            .block_on(async move { self.get_all_transfer_jobs_internal().await })
+    }
+
+    pub async fn delete_transfer_job_internal(&self, job_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            "DELETE FROM transfer_jobs_internal WHERE job_id = ?",
+            job_id
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    pub fn delete_transfer_job_internal_sync(&self, job_id: Uuid) -> Result<(), sqlx::Error> {
+        self.rt
+            .block_on(async move { self.delete_transfer_job_internal(job_id).await })
+    }
+
     pub fn new(rt: Arc<Runtime>) -> Self {
-        let url = format!("sqlite://{}", get_working_dir().join("neptis.db").to_str().unwrap());
+        let url = format!(
+            "sqlite://{}",
+            get_working_dir().join("neptis.db").to_str().unwrap()
+        );
         Self {
             rt: rt.clone(),
             pool: {

@@ -1,20 +1,20 @@
 ﻿use crate::api::dtos::{PostForAutoScheduleStartDto, TransferJobDto};
 use crate::errors::ApiError;
-use crate::models::{RCloneStat, TransferJob, TransferJobStatus};
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use chrono::Utc;
 use cron::{Schedule, TimeUnitSpec};
 use duct::cmd;
-use neptis_lib::prelude::DbController;
+use neptis_lib::db::sync_models::{RCloneMessage, RCloneStat, TransferJob, TransferJobStatus};
+use neptis_lib::prelude::{DbController, TransferJobInternalDto};
 use rocket::futures::task::Spawn;
 use rocket::yansi::Paint;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 use std::{
     fs,
@@ -114,12 +114,32 @@ impl RCloneJobLaunchInfo {
 
 pub struct RCloneClient {
     settings: RCloneSettings,
-    jobs: Arc<Mutex<Vec<TransferJob>>>,
     db: Arc<DbController>,
     start_tx: Mutex<Option<Sender<PostForAutoScheduleStartDto>>>,
+    _jobs: Arc<Mutex<Vec<TransferJob>>>,
 }
 
 impl RCloneClient {
+    fn _get_jobs_locked(&self) -> Result<MutexGuard<Vec<TransferJob>>, ApiError> {
+        let mut _lock = self._jobs.lock().unwrap();
+        {
+            let saved_jobs = &mut *_lock;
+            for db_job in self.db.get_all_transfer_jobs_internal_sync()? {
+                if !saved_jobs.iter().any(|x| x.dto.job_id == db_job.job_id) {
+                    saved_jobs.push(db_job.into());
+                }
+            }
+        }
+        Ok(_lock)
+    }
+
+    fn _save_jobs(&self) -> Result<(), ApiError> {
+        for job in &*self._jobs.lock().unwrap() {
+            self.db.save_transfer_job_internal_sync(&job.dto)?
+        }
+        Ok(())
+    }
+
     fn _find_smb_address(url_str: impl AsRef<str>) -> Result<String, ApiError> {
         Url::parse(url_str.as_ref())
             .map(|x| x.host_str().map(|y| y.to_string()))
@@ -190,67 +210,71 @@ impl RCloneClient {
                 Err(_) => break,
             }
         }
-        let all_jobs = &mut *self.jobs.lock().unwrap();
         let all_schedules = self.db.get_all_transfer_auto_schedules_sync()?;
-        for job in self.db.get_all_transfer_auto_jobs_sync()? {
-            // Find the schedule and see if a job is currently running or not.
-            if let Some((job_schedule, cron_schedule)) = all_schedules
-                .iter()
-                .find(|x| x.schedule_name == job.schedule_name && x.server_name == job.server_name)
-                .map(|x| Schedule::from_str(&x.cron_schedule).ok().map(|y| (x, y)))
-                .flatten()
-            {
-                let related_jobs = all_jobs
+        let mut all_infos = vec![];
+        {
+            // We need to keep the `all_jobs` variable in a separate scope due to locking.
+            let all_jobs = self._get_jobs_locked()?;
+            for job in self.db.get_all_transfer_auto_jobs_sync()? {
+                // Find the schedule and see if a job is currently running or not.
+                if let Some((job_schedule, cron_schedule)) = all_schedules
                     .iter()
-                    .filter(|x| {
-                        x.server.server_name == job.server_name
-                            && x.smb_folder == job.smb_folder
-                            && x.local_folder == job.local_folder
-                            && x.auto_job == Some(job.action_name.clone())
+                    .find(|x| {
+                        x.schedule_name == job.schedule_name && x.server_name == job.server_name
                     })
-                    .collect::<Vec<_>>();
-                if related_jobs
-                    .iter()
-                    .any(|x| x.status() == TransferJobStatus::Running)
+                    .map(|x| Schedule::from_str(&x.cron_schedule).ok().map(|y| (x, y)))
+                    .flatten()
                 {
-                    println!("Job is currently running. Skipping...");
-                    continue;
-                }
-                let now = Utc::now();
-                let next_run = related_jobs
-                    .iter()
-                    .filter_map(|x| x.end_date)
-                    .max()
-                    .map(|last_ran| {
-                        cron_schedule
-                            .after(&last_ran.and_utc())
-                            .next()
-                            .ok_or_else(|| {
-                                ApiError::InternalError("Failed to calculate next run!".into())
-                            })
-                    })
-                    .transpose()? // unwraps Result<Option<T>> to Option<T>, propagates Err
-                    .unwrap_or(now);
+                    let related_jobs = all_jobs
+                        .iter()
+                        .filter(|x| {
+                            x.dto.server_name == job.server_name
+                                && x.dto.smb_folder == job.smb_folder
+                                && x.dto.local_folder == job.local_folder
+                                && x.dto.auto_job == Some(job.action_name.clone())
+                        })
+                        .collect::<Vec<_>>();
+                    if related_jobs
+                        .iter()
+                        .any(|x| x.status() == TransferJobStatus::Running)
+                    {
+                        println!("Job is currently running. Skipping...");
+                        continue;
+                    }
+                    let now = Utc::now();
+                    let last_ran = related_jobs
+                        .iter()
+                        .filter_map(|x| x.dto.end_date.or(x.dto.start_date))
+                        .max()
+                        .map(|dt| dt.and_utc())
+                        .unwrap_or(job_schedule.date_created.0);
 
-                if now >= next_run
-                    || start_jobs.iter().any(|x| {
-                        job_schedule.server_name == x.server_name
-                            && job_schedule.schedule_name == x.schedule_name
-                    })
-                {
-                    self.create_and_start_job(&RCloneJobLaunchInfo {
-                        server_name: job.server_name.clone(),
-                        smb_user_name: job_schedule.smb_user_name.clone(),
-                        smb_password: job_schedule.smb_password.clone(),
-                        local_folder: job.local_folder.clone(),
-                        smb_folder: job.smb_folder.clone(),
-                        auto_job: Some(job.action_name.clone()),
-                    })?;
+                    
+                    if cron_schedule
+                        .after(&last_ran)
+                        .any(|next_run| now >= next_run)
+                        || start_jobs.iter().any(|x| {
+                            job_schedule.server_name == x.server_name
+                                && job_schedule.schedule_name == x.schedule_name
+                        })
+                    {
+                        all_infos.push(RCloneJobLaunchInfo {
+                            server_name: job.server_name.clone(),
+                            smb_user_name: job_schedule.smb_user_name.clone(),
+                            smb_password: job_schedule.smb_password.clone(),
+                            local_folder: job.local_folder.clone(),
+                            smb_folder: job.smb_folder.clone(),
+                            auto_job: Some(job.action_name.clone()),
+                        });
+                    }
                 }
             }
         }
-        // For each job, attempt to start it in a batch if possible.
-        Ok(())
+        for info in all_infos {
+            self.create_and_start_job(&info)?;
+        }
+
+        self._save_jobs() // *** always save all jobs at the end!
     }
 
     pub fn handle_blocking(&self) {
@@ -282,26 +306,26 @@ impl RCloneClient {
             let current_now = Utc::now().naive_utc();
             let job = _lock
                 .iter_mut()
-                .find(|x| x.job_id == job_id)
+                .find(|x| x.dto.job_id == job_id)
                 .expect("Expected job to exist after creation!");
             if !msg.is_empty() {
                 if fatal {
-                    job.fatal_errors.push(msg.into());
+                    job.dto.fatal_errors.push(msg.into());
                 } else {
-                    job.warnings.push(msg.into());
+                    job.dto.warnings.push(msg.into());
                 }
             }
             if let Some(stat) = stat {
-                job.last_stats = Some(stat); // *** prevent a None value from overwriting.
+                job.dto.last_stats = Some(stat.into()); // *** prevent a None value from overwriting.
             }
             if fatal {
                 // We can assume the thread has already been disconnected here.
-                job.end_date = Some(current_now);
+                job.dto.end_date = Some(current_now);
                 job._thread = None;
                 job._cancel_tx = None;
                 job._cancel_rx = None;
             }
-            job.last_updated = current_now;
+            job.dto.last_updated = current_now;
         };
         match cmd.reader() {
             Ok(handle) => {
@@ -309,8 +333,15 @@ impl RCloneClient {
                 for line in rdr.lines() {
                     match line {
                         Ok(line) => {
-                            if let Ok(stat) = serde_json::from_str::<RCloneStat>(&line) {
-                                mark_message("", false, Some(stat));
+                            println!("{}", &line);
+                            let trimmed = line.trim_matches('"');
+                            let unescaped = trimmed.replace("\\\"", "\"");
+                            println!();
+                            match serde_json::from_str::<RCloneMessage>(&unescaped) {
+                                Ok(msg) => {
+                                    mark_message("", false, Some(msg.stats));
+                                }
+                                Err(e) => println!("Json Error: {e}"),
                             }
                         }
                         Err(e) => {
@@ -392,48 +423,77 @@ impl RCloneClient {
         }
     }
 
+    fn _remove_old_tmp_files<P: AsRef<Path>>(folder: P) {
+        let one_day = Duration::from_secs(60 * 60 * 24);
+        let now = SystemTime::now();
+
+        if let Ok(entries) = fs::read_dir(&folder) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+
+                    if path.extension().map_or(false, |ext| ext == "tmp") {
+                        if let Ok(metadata) = fs::metadata(&path) {
+                            if let Ok(modified) = metadata.modified() {
+                                if now.duration_since(modified).unwrap_or_default() > one_day {
+                                    println!("Deleting: {:?}", path);
+                                    let _ = fs::remove_file(&path); // Ignore errors
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     ////////////////////////////////////////////////// all public methods below
 
     //noinspection RsFormatMacroWithoutFormatArguments
     pub fn start_job(&self, job_id: Uuid) -> Result<(), ApiError> {
         self._ensure_check()?; // **** make sure we are okay!
-        let _lock = &mut *self.jobs.lock().unwrap();
+        let mut _lock = self._get_jobs_locked()?;
         let job = _lock
             .iter_mut()
             .filter(|x| x.status() != TransferJobStatus::Running)
-            .find(|x| x.job_id == job_id)
+            .find(|x| x.dto.job_id == job_id)
             .ok_or(ApiError::BadRequest(
                 "Job ID does not exist or is running already!".into(),
             ))?;
+        let server = self
+            .db
+            .get_all_servers_sync()?
+            .into_iter()
+            .find(|x| x.server_name == job.dto.server_name)
+            .ok_or(ApiError::BadRequest("Server does not exist!".into()))?;
 
         let exe_path = self.settings.exe_path();
         let exe_path_str = exe_path.to_str().unwrap();
 
-        let host_id = BASE64_STANDARD
-            .encode(&job.server.server_name)
-            .replace("=", "");
-
+        let host_id = BASE64_STANDARD.encode(&server.server_name).replace("=", "");
         let mut c_entry = String::new();
         {
-            let host = Self::_find_smb_address(&job.server.server_endpoint)?;
-            let pass = cmd!(exe_path_str, "obscure", &job.smb_password).read()?;
+            let host = Self::_find_smb_address(&server.server_endpoint)?;
+            let pass = cmd!(exe_path_str, "obscure", &job.dto.smb_password).read()?;
             c_entry += &format!("[{}]\n", &host_id);
             c_entry += &format!("type = smb\n");
             c_entry += &format!("host = {}\n", host);
-            c_entry += &format!("user = {}\n", &job.smb_user_name);
+            c_entry += &format!("user = {}\n", &job.dto.smb_user_name);
             c_entry += &format!("pass = {}\n", pass);
         }
 
-        let config_path = self.settings.working_path.join(Uuid::new_v4().to_string());
+        Self::_remove_old_tmp_files(&self.settings.working_path);
+        let mut config_path = self.settings.working_path.join(Uuid::new_v4().to_string());
+        config_path.set_extension("tmp");
         fs::write(&config_path, c_entry)?;
 
-        let out_folder = Self::_parse_smb_path(&job.smb_user_name, &job.smb_folder).ok_or(
+        let out_folder = Self::_parse_smb_path(&job.dto.smb_user_name, &job.dto.smb_folder).ok_or(
             ApiError::BadRequest("You did not correctly put in the SMB folder!".into()),
         )?;
         let cmd_exp = cmd!(
             exe_path_str,
             "sync",
-            &job.local_folder,
+            &job.dto.local_folder,
             format!("{}:{}", host_id, &out_folder),
             "--use-json-log",
             "--stats",
@@ -447,13 +507,13 @@ impl RCloneClient {
         .stderr_to_stdout();
 
         // Set the start date and attempt to pass it off to the thread.
-        let jobs = self.jobs.clone();
+        let jobs = self._jobs.clone();
         let (s_tx, s_rx) = channel::<()>();
         let (r_tx, r_rx) = channel::<bool>();
-        job.start_date = Some(Utc::now().naive_utc());
-        job.fatal_errors = vec![];
-        job.warnings = vec![];
-        job.last_stats = None;
+        job.dto.start_date = Some(Utc::now().naive_utc());
+        job.dto.fatal_errors = vec![].into();
+        job.dto.warnings = vec![].into();
+        job.dto.last_stats = None;
         job._cancel_tx = Some(s_tx);
         job._cancel_rx = Some(r_rx);
         job._thread = Some(thread::spawn(move || {
@@ -463,11 +523,11 @@ impl RCloneClient {
     }
 
     pub fn cancel_job(&self, job_id: Uuid) -> Result<(), ApiError> {
-        let _lock = &mut *self.jobs.lock().unwrap();
+        let mut _lock = self._get_jobs_locked()?;
         let job = _lock
             .iter_mut()
             .filter(|x| x.status() == TransferJobStatus::Running)
-            .find(|x| x.job_id == job_id)
+            .find(|x| x.dto.job_id == job_id)
             .ok_or(ApiError::BadRequest(
                 "Job ID does not exist or is not running!".into(),
             ))?;
@@ -509,21 +569,23 @@ impl RCloneClient {
             .map(|x| x.to_owned())
             .ok_or(ApiError::BadRequest("Cannot locate server!".into()))?;
         {
-            let y = &mut *self.jobs.lock().unwrap();
+            let mut y = self._get_jobs_locked()?;
             y.push(TransferJob {
-                server,
-                job_id: job_id.clone(),
-                smb_user_name: info.smb_user_name,
-                smb_password: info.smb_password,
-                smb_folder: info.smb_folder,
-                local_folder: info.local_folder,
-                auto_job: info.auto_job,
-                last_stats: None,
-                start_date: None,
-                end_date: None,
-                fatal_errors: vec![],
-                warnings: vec![],
-                last_updated: Utc::now().naive_utc(),
+                dto: TransferJobInternalDto {
+                    job_id,
+                    auto_job: info.auto_job,
+                    server_name: server.server_name,
+                    smb_user_name: info.smb_user_name.clone(),
+                    smb_password: info.smb_password.clone(),
+                    smb_folder: info.smb_folder.clone(),
+                    local_folder: info.local_folder.clone(),
+                    last_stats: None,
+                    start_date: None,
+                    end_date: None,
+                    fatal_errors: vec![].into(),
+                    warnings: vec![].into(),
+                    last_updated: Utc::now().naive_utc(),
+                },
                 _thread: None,
                 _cancel_tx: None,
                 _cancel_rx: None,
@@ -533,24 +595,19 @@ impl RCloneClient {
     }
 
     pub fn get_job(&self, job_id: Uuid) -> Option<TransferJobDto> {
-        let _lock = &*self.jobs.lock().unwrap();
-        _lock.iter().find(|x| x.job_id == job_id).map(|x| x.into())
+        let _lock = self._get_jobs_locked().ok()?;
+        _lock
+            .iter()
+            .find(|x| x.dto.job_id == job_id)
+            .map(|x| x.into())
     }
 
-    pub fn new(
-        settings: RCloneSettings,
-        jobs: Arc<Mutex<Vec<TransferJob>>>,
-        db: Arc<DbController>,
-    ) -> Self {
+    pub fn new(settings: RCloneSettings, db: Arc<DbController>) -> Self {
         Self {
             settings,
-            jobs,
             db,
             start_tx: Mutex::new(None),
+            _jobs: Arc::new(Mutex::new(vec![])),
         }
-    }
-
-    pub fn new_owned(settings: RCloneSettings, db: Arc<DbController>) -> Self {
-        Self::new(settings, Arc::new(Mutex::new(vec![])), db)
     }
 }

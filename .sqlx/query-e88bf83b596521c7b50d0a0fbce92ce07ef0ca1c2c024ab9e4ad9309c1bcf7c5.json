@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO transfer_jobs_internal (\n                job_id,\n                auto_job,\n                server_name,\n                smb_user_name,\n                smb_password,\n                smb_folder,\n                local_folder,\n                last_stats,\n                start_date,\n                end_date,\n                fatal_errors,\n                warnings,\n                last_updated\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "e88bf83b596521c7b50d0a0fbce92ce07ef0ca1c2c024ab9e4ad9309c1bcf7c5"
+}
