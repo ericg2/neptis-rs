@@ -41,6 +41,7 @@ use std::{
     thread,
     time::Duration,
 };
+use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use ui::manager::{
     ApiContext, ModelExtraOption, ModelManager, ModelProperty, PromptResult, PropGetType,
@@ -125,7 +126,8 @@ struct UiApp {
 }
 
 static DEFAULT_PASS: &'static str = "default123";
-static MAX_JOBS: usize = 15;
+static MAX_JOBS: usize = 5;
+static MAX_SYNC_JOBS: usize = 5;
 
 impl UiApp {
     // inspected
@@ -257,42 +259,46 @@ impl UiApp {
             match result {
                 Ok(Event::Key(key)) => match key.code {
                     KeyCode::Left => {
-                        if index > 0 {
+                        if key.is_press() && index > 0 {
                             index -= 1;
                         }
                     }
                     KeyCode::Right => {
-                        if index + 1 < snapshots.len() {
+                        if key.is_press() && index + 1 < snapshots.len() {
                             index += 1;
                         }
                     }
                     KeyCode::Char('l') => {
                         // Attempt to lock or unlock the given snapshot.
-                        println!("*** Please wait...");
-                        let m_api = &*self.api.read().unwrap();
-                        let is_locked = snapshot.locked;
-                        let id = snapshot.id.clone();
-                        if {
-                            if let Some(api) = m_api {
-                                self.rt.block_on(async move {
-                                    if !is_locked {
-                                        api.lock_one_snapshot(mount, id.as_str()).await
-                                    } else {
-                                        api.unlock_one_snapshot(mount, id.as_str()).await
-                                    }
-                                })
-                            } else {
-                                Err(NeptisError::Str("API is invalid!".into()))
+                        if key.is_press() {
+                            println!("*** Please wait...");
+                            let m_api = &*self.api.read().unwrap();
+                            let is_locked = snapshot.locked;
+                            let id = snapshot.id.clone();
+                            if {
+                                if let Some(api) = m_api {
+                                    self.rt.block_on(async move {
+                                        if !is_locked {
+                                            api.lock_one_snapshot(mount, id.as_str()).await
+                                        } else {
+                                            api.unlock_one_snapshot(mount, id.as_str()).await
+                                        }
+                                    })
+                                } else {
+                                    Err(NeptisError::Str("API is invalid!".into()))
+                                }
                             }
-                        }
-                        .is_ok()
-                        {
-                            snapshot.locked = !is_locked;
-                            continue;
+                            .is_ok()
+                            {
+                                snapshot.locked = !is_locked;
+                                continue;
+                            }
                         }
                     }
                     KeyCode::Char('q') | KeyCode::Enter => {
-                        break;
+                        if key.is_press() {
+                            break;
+                        }
                     }
                     _ => {}
                 },
@@ -301,6 +307,134 @@ impl UiApp {
         }
 
         self.on_manage_snapshot(mount);
+    }
+
+    fn on_select_rclone_job(&self, id: Uuid) {
+        let mut last_refresh = Instant::now();
+        let mut first_time = true;
+        loop {
+            if first_time || last_refresh.elapsed().as_secs() >= 5 {
+                first_time = false;
+                clearscreen::clear().expect("Failed to clear screen!");
+                match self.rt.block_on(async { WebApi::ipc_get_job(id).await }) {
+                    Ok(dto) => {
+                        println!("================ Transfer Job Info ================");
+                        println!("Job ID:             {}", dto.job_id);
+                        println!("Server Name:        {}", dto.server_name);
+                        println!("SMB Folder:         {}", dto.smb_folder);
+                        println!("Local Folder:       {}", dto.local_folder);
+                        println!("Status:             {:?}", dto.stat);
+
+                        if !dto.errors.is_empty() {
+                            println!(
+                                "Errors ({}):         {}",
+                                dto.errors.len(),
+                                dto.errors.join(", ")
+                            );
+                        } else {
+                            println!("Errors:             -");
+                        }
+
+                        println!(
+                            "Start Date:         {}",
+                            dto.start_date
+                                .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "End Date:           {}",
+                            dto.end_date
+                                .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "Last Updated:       {}",
+                            dto.last_updated.format("%Y-%m-%d %H:%M:%S")
+                        );
+
+                        if let Some(stats) = &dto.last_stats {
+                            println!("------------------ Last RClone Stats --------------");
+                            println!("Transferred:        {}", FileSize::prettify(stats.bytes));
+                            println!("Transfer Speed:     {}/s", FileSize::prettify(stats.speed));
+                            println!("Checks:             {}", stats.checks);
+                            println!("Deletes:            {}", stats.deletes);
+                            println!("Renames:            {}", stats.renames);
+                            println!("Listed:             {}", stats.listed);
+                            println!("Retry Error:        {}", stats.retry_error);
+                            println!("Deleted Dirs:       {}", stats.deleted_dirs);
+                            println!("Server Copies:      {}", stats.server_side_copies);
+                            println!(
+                                "Copy Bytes:         {}",
+                                FileSize::prettify(stats.server_side_copy_bytes)
+                            );
+                            println!(
+                                "Move Bytes:         {}",
+                                FileSize::prettify(stats.server_side_move_bytes)
+                            );
+                            println!("Moves:              {}", stats.server_side_moves);
+                            println!(
+                                "Total Bytes:        {}",
+                                FileSize::prettify(stats.total_bytes)
+                            );
+                            println!("Total Checks:       {}", stats.total_checks);
+                            println!("Total Transfers:    {}", stats.total_transfers);
+                        } else {
+                            println!("Last RClone Stats:  -");
+                        }
+
+                        println!("===================================================\n");
+                        println!("(Waiting... Press any key to select options/exit)\n");
+                    }
+                    Err(e) => {
+                        println!("Failed to show job information: {:?}", e);
+                        break;
+                    }
+                }
+                last_refresh = Instant::now();
+            }
+
+            if event::poll(Duration::from_millis(100)).unwrap() {
+                match event::read().unwrap() {
+                    Event::Key(key_event) => {
+                        if key_event.is_press() {
+                            if key_event.code == KeyCode::Enter {
+                                break;
+                            }
+
+                            // Go to interactive menu
+                            const STR_CANCEL: &'static str = "Cancel Job";
+                            const STR_GO_BACK: &'static str = "Go Back";
+                            let mut options = vec![STR_GO_BACK];
+                            if let Ok(job) =
+                                self.rt.block_on(async { WebApi::ipc_get_job(id).await })
+                                && job.stat == TransferJobStatus::Running
+                            {
+                                options.push(STR_CANCEL);
+                            }
+
+                            if Select::new("Please select an action", options)
+                                .prompt_skippable()
+                                .expect("Failed to show prompt!")
+                                == Some(STR_CANCEL)
+                            {
+                                println!("\n*** Cancelling job...");
+                                match self.rt.block_on(async { WebApi::ipc_cancel_job(id).await }) {
+                                    Ok(_) => println!("  Successful!"),
+                                    Err(e) => println!("  Failed! Error: {e}"),
+                                }
+                                first_time = true; // *** force an instant refresh!
+                                thread::sleep(Duration::from_secs(2));
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.show_rclone_schedules();
     }
 
     // inspected
@@ -392,74 +526,82 @@ impl UiApp {
             if event::poll(Duration::from_millis(100)).unwrap() {
                 match event::read().unwrap() {
                     Event::Key(key_event) => {
-                        if key_event.code == KeyCode::Enter {
-                            break;
-                        }
-
-                        // Go to interactive menu
-                        let dto = {
-                            let m_api = &*self.api.read().unwrap();
-                            if let Some(api) = m_api {
-                                self.rt.block_on(async move {
-                                    api.get_all_jobs_for_mount(mount)
-                                        .await?
-                                        .into_iter()
-                                        .find(|x| x.id == j_id)
-                                        .ok_or(NeptisError::Str("Failed to find the job!".into()))
-                                })
-                            } else {
-                                Err(NeptisError::Str("API is not valid!".into()))
+                        if key_event.is_press() {
+                            if key_event.code == KeyCode::Enter {
+                                break;
                             }
-                        };
 
-                        match dto {
-                            Ok(dto) => {
-                                if dto.snapshot_id.is_some() {
-                                    if Select::new(
-                                        "Please select an action",
-                                        vec!["Go Back", "View Snapshot"],
-                                    )
-                                    .prompt_skippable()
-                                    .expect("Failed to show prompt!")
-                                        == Some("View Snapshot")
-                                    {
-                                        match {
-                                            let m_api = &*self.api.read().unwrap();
-                                            if let Some(api) = m_api {
-                                                self.rt.block_on(async move {
-                                                    api.get_one_snapshot(
-                                                        dto.point_name.as_str(),
-                                                        dto.snapshot_id
-                                                            .clone()
-                                                            .expect(
-                                                                "Expected snapshot to be valid!",
-                                                            )
-                                                            .as_str(),
-                                                    )
-                                                    .await
-                                                })
-                                            } else {
-                                                Err(NeptisError::Str("API is not valid!".into()))
+                            // Go to interactive menu
+                            let dto = {
+                                let m_api = &*self.api.read().unwrap();
+                                if let Some(api) = m_api {
+                                    self.rt.block_on(async move {
+                                        api.get_all_jobs_for_mount(mount)
+                                            .await?
+                                            .into_iter()
+                                            .find(|x| x.id == j_id)
+                                            .ok_or(NeptisError::Str(
+                                                "Failed to find the job!".into(),
+                                            ))
+                                    })
+                                } else {
+                                    Err(NeptisError::Str("API is not valid!".into()))
+                                }
+                            };
+
+                            match dto {
+                                Ok(dto) => {
+                                    if dto.snapshot_id.is_some() {
+                                        if Select::new(
+                                            "Please select an action",
+                                            vec!["Go Back", "View Snapshot"],
+                                        )
+                                        .prompt_skippable()
+                                        .expect("Failed to show prompt!")
+                                            == Some("View Snapshot")
+                                        {
+                                            match {
+                                                let m_api = &*self.api.read().unwrap();
+                                                if let Some(api) = m_api {
+                                                    self.rt.block_on(async move {
+                                                        api.get_one_snapshot(
+                                                            dto.point_name.as_str(),
+                                                            dto.snapshot_id
+                                                                .clone()
+                                                                .expect(
+                                                                    "Expected snapshot to be valid!",
+                                                                )
+                                                                .as_str(),
+                                                        )
+                                                            .await
+                                                    })
+                                                } else {
+                                                    Err(NeptisError::Str(
+                                                        "API is not valid!".into(),
+                                                    ))
+                                                }
+                                            } {
+                                                Ok(s_dto) => {
+                                                    self.on_select_snapshot(mount, &[s_dto])
+                                                }
+                                                Err(_) => break,
                                             }
-                                        } {
-                                            Ok(s_dto) => self.on_select_snapshot(mount, &[s_dto]),
-                                            Err(_) => break,
+                                        } else {
+                                            break;
                                         }
                                     } else {
-                                        break;
-                                    }
-                                } else {
-                                    if Confirm::new("Do you want to go back")
-                                        .with_default(true)
-                                        .prompt_skippable()
-                                        .map(|x| x.unwrap_or(true))
-                                        .expect("Failed to show prompt!")
-                                    {
-                                        break;
+                                        if Confirm::new("Do you want to go back")
+                                            .with_default(true)
+                                            .prompt_skippable()
+                                            .map(|x| x.unwrap_or(true))
+                                            .expect("Failed to show prompt!")
+                                        {
+                                            break;
+                                        }
                                     }
                                 }
+                                Err(_) => break,
                             }
-                            Err(_) => break,
                         }
                     }
                     _ => {}
@@ -751,7 +893,7 @@ impl UiApp {
                                     .1
                                     .clone()
                                     .ok_or(NeptisError::Str("Failed to find username!".into()))?,
-                                date_created: Utc::now().into()
+                                last_updated: Utc::now().naive_utc(),
                             })?
                         }
                     } else if ret != STR_ACCEPT {
@@ -769,14 +911,54 @@ impl UiApp {
                             .1
                             .clone()
                             .ok_or(NeptisError::Str("Failed to find username!".into()))?,
-                        date_created: Utc::now().into(),
+                        last_updated: Utc::now().naive_utc(),
                     })?)
             }
         }))
         .do_display();
         match ret {
             Ok(ret) => match ret {
-                Some(x) => self.on_manage_rclone_actions(&x.schedule_name, &server_owned),
+                Some(x) => {
+                    const STR_VIEW_JOBS: &'static str = "View Jobs";
+                    const STR_MANAGE_ACTIONS: &'static str = "Manage Actions";
+                    const STR_START_JOB: &'static str = "Immediate Start";
+                    match Select::new(
+                        "Please choose an option",
+                        vec![STR_VIEW_JOBS, STR_MANAGE_ACTIONS],
+                    )
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    {
+                        Some(STR_MANAGE_ACTIONS) => {
+                            self.on_manage_rclone_actions(&x.schedule_name, &server_owned)
+                        }
+                        Some(STR_VIEW_JOBS) => {
+                            self.on_manage_rclone_jobs(&x.schedule_name, &server_owned)
+                        },
+                        Some(STR_START_JOB) => {
+                            // Attempt to immediately start the job.
+                            println!("*** Attempting to start job. Please wait...");
+                            match self.rt.block_on(async {
+                                WebApi::ipc_start_auto_job(PostForAutoScheduleStartDto {
+                                    server_name: server_owned.clone(),
+                                    schedule_name: x.schedule_name.clone(),
+                                }).await
+                            }) {
+                                Ok(_) => {
+                                    println!("> Successfully started job!");
+                                    thread::sleep(Duration::from_secs(2));
+                                    self.on_manage_rclone_jobs(&x.schedule_name, &server_owned);
+                                },
+                                Err(_) => {
+                                    println!("> Failed to start job!");
+                                    thread::sleep(Duration::from_secs(2));
+                                    self.show_rclone_schedules();
+                                }
+                            }
+                        }
+                        _ => self.show_dashboard(),
+                    }
+                }
                 None => self.show_dashboard(),
             },
             Err(e) => {
@@ -784,6 +966,36 @@ impl UiApp {
                 println!("*** An unexpected error has occurred. Error: {e}");
                 thread::sleep(Duration::from_secs(2));
                 self.show_dashboard()
+            }
+        }
+    }
+
+    fn on_manage_rclone_jobs(&self, schedule_name: &str, server_name: &str) {
+        if let Ok(jobs) = self.rt.block_on(async {
+            WebApi::ipc_get_jobs().await.map(|y| {
+                y.into_iter()
+                    .filter(|x| x.auto_job_schedule_name == Some(schedule_name.into()))
+                    .collect::<Vec<_>>()
+            })
+        }) {
+            const GO_BACK: &'static str = "Go Back";
+            let mut choices = jobs
+                .iter()
+                .map(|x| x.to_short_id_string())
+                .collect::<Vec<_>>();
+            choices.insert(0, GO_BACK.into());
+
+            if let Some(job_str) = Select::new("Please select a job to manage", choices)
+                .prompt_skippable()
+                .expect("Failed to show prompt!")
+                && let Some(sel_job_id) = jobs
+                    .iter()
+                    .find(|x| x.to_short_id_string() == job_str)
+                    .map(|x| x.job_id)
+            {
+                self.on_select_rclone_job(sel_job_id);
+            } else {
+                self.show_rclone_schedules();
             }
         }
     }
@@ -2351,7 +2563,9 @@ impl UiApp {
 
             // Poll for a keypress non-blocking
             if event::poll(Duration::from_millis(100)).unwrap() {
-                if let Event::Key(_) = event::read().unwrap() {
+                if let Event::Key(k) = event::read().unwrap()
+                    && k.is_press()
+                {
                     break;
                 }
             }
@@ -2643,7 +2857,10 @@ impl UiApp {
                         .expect("Failed to show prompt!")
                         .unwrap_or(false)
                 {
-                    let d_path = self.mnt.clone().unwrap_or(get_working_dir().to_str().unwrap().to_string());
+                    let d_path = self
+                        .mnt
+                        .clone()
+                        .unwrap_or(get_working_dir().to_str().unwrap().to_string());
                     if auto && !d_path.is_empty() {
                         unmount_if_stale(&d_path);
                         match (|| {
@@ -2829,24 +3046,28 @@ impl UiApp {
                     disable_raw_mode().expect("Failed to disable raw mode");
 
                     match result {
-                        Ok(Event::Key(key)) => match key.code {
-                            KeyCode::Left => {
-                                offset = offset.saturating_sub(PAGE_SIZE);
-                            }
-                            KeyCode::Right => {
-                                if offset + PAGE_SIZE < messages.len() {
-                                    offset += PAGE_SIZE;
+                        Ok(Event::Key(key)) => {
+                            if key.is_press() {
+                                match key.code {
+                                    KeyCode::Left => {
+                                        offset = offset.saturating_sub(PAGE_SIZE);
+                                    }
+                                    KeyCode::Right => {
+                                        if offset + PAGE_SIZE < messages.len() {
+                                            offset += PAGE_SIZE;
+                                        }
+                                    }
+                                    KeyCode::Char('q') | KeyCode::Enter => {
+                                        break;
+                                    }
+                                    KeyCode::Char('s') => {
+                                        // Ask about sending the message.
+                                        self.send_message(true);
+                                    }
+                                    _ => {}
                                 }
                             }
-                            KeyCode::Char('q') | KeyCode::Enter => {
-                                break;
-                            }
-                            KeyCode::Char('s') => {
-                                // Ask about sending the message.
-                                self.send_message(true);
-                            }
-                            _ => {}
-                        },
+                        }
                         _ => {}
                     }
                 }
@@ -2892,7 +3113,6 @@ impl UiApp {
         let mut is_admin: bool = false;
         loop {
             if first_time || last_refresh.elapsed().as_secs() >= 1000 {
-                first_time = false;
                 clearscreen::clear().expect("Failed to clear screen!");
                 let m_api = &*self.api.read().unwrap();
                 if let Some(api) = m_api {
@@ -2925,6 +3145,7 @@ impl UiApp {
                                 x.sort_by(|a, b| b.create_date.cmp(&a.create_date));
                                 x.iter()
                                     .map(|x| x.to_short_id_string())
+                                    .take(MAX_JOBS)
                                     .collect::<Vec<_>>()
                                     .join("\n")
                             }) {
@@ -2937,6 +3158,32 @@ impl UiApp {
                             Err(_) => "Failed to load".into(),
                         }
                     );
+
+                    // Attempt to show all running RCLONE jobs.
+                    println!(
+                        "============== Top {} Sync Jobs\n{}\n\n",
+                        MAX_SYNC_JOBS,
+                        match self
+                            .rt
+                            .block_on(async { WebApi::ipc_get_jobs().await })
+                            .map(|mut x| {
+                                x.sort_by(|a, b| b.last_updated.cmp(&a.last_updated));
+                                x.iter()
+                                    .map(|x| x.to_short_id_string())
+                                    .take(MAX_SYNC_JOBS)
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            }) {
+                            Ok(ret) => {
+                                if ret.trim().is_empty() {
+                                    "None".into()
+                                } else {
+                                    ret.trim().to_string()
+                                }
+                            }
+                            Err(e) => "*** Background service pull failed!".into(),
+                        }
+                    );
                 } else {
                     disable_raw_mode().ok();
                     self.begin(); // not logged in
@@ -2947,11 +3194,15 @@ impl UiApp {
             }
 
             // Poll for a keypress non-blocking
-            if event::poll(Duration::from_millis(100)).unwrap() {
-                if let Event::Key(_) = event::read().unwrap() {
+            if !first_time && event::poll(Duration::from_millis(10)).unwrap() {
+                if let Event::Key(k) = event::read().unwrap()
+                    && k.is_press()
+                {
                     break;
                 }
             }
+
+            first_time = false;
         }
         let mut menu_items = vec![STR_BACK, STR_BROWSER];
 
@@ -2976,7 +3227,7 @@ impl UiApp {
         menu_items.push(STR_LOGOUT);
 
         // Show menu
-        match inquire::Select::new("Please select an action", menu_items)
+        match Select::new("Please select an action", menu_items)
             .prompt_skippable()
             .expect("Failed to show prompt!")
         {
@@ -3197,7 +3448,9 @@ impl UiApp {
 
                             loop {
                                 if let Ok(true) = event::poll(Duration::from_secs(0)) {
-                                    if let Ok(Event::Key(_)) = event::read() {
+                                    if let Ok(Event::Key(k)) = event::read()
+                                        && k.is_press()
+                                    {
                                         user_cancelled = true;
                                         break;
                                     }
@@ -3218,7 +3471,9 @@ impl UiApp {
                                 // Wait 10 seconds with cancellation check
                                 for _ in 0..10 {
                                     if let Ok(true) = event::poll(Duration::from_secs(1)) {
-                                        if let Ok(Event::Key(_)) = event::read() {
+                                        if let Ok(Event::Key(k)) = event::read()
+                                            && k.is_press()
+                                        {
                                             user_cancelled = true;
                                             break;
                                         }
@@ -3289,6 +3544,24 @@ impl UiApp {
             s.strip_suffix("/").unwrap_or(s).to_string()
         }
 
+        // 7-1-25: Check to see if the IPC service is running or not.
+        if cfg!(not(debug_assertions))
+            && let Ok(schedules) = self.db.get_all_transfer_auto_schedules_sync()
+            && schedules.len() > 0
+            && self
+                .rt
+                .block_on(async { WebApi::ipc_ping().await.is_err() })
+            && Confirm::new("The background service is not running. Do you want to exit?")
+                .with_default(false)
+                .prompt_skippable()
+                .expect("Failed to show prompt!")
+                .map(|x| if x { None } else { Some(x) })
+                .flatten()
+                .is_none()
+        {
+            return;
+        }
+
         // Check if a default server is set.
         if cfg!(not(debug_assertions)) {
             if let Some(d_item) = self
@@ -3305,7 +3578,9 @@ impl UiApp {
                 );
                 enable_raw_mode().expect("Failed to enable raw mode");
                 if event::poll(Duration::from_secs(2)).expect("Polling failed") {
-                    if let Event::Key(_) = event::read().expect("Failed to read event") {
+                    if let Event::Key(k) = event::read().expect("Failed to read event")
+                        && k.is_press()
+                    {
                         do_auto = false;
                     }
                 }
@@ -3586,8 +3861,11 @@ impl UiApp {
 
 use crate::ui::browser::FileBrowserMode;
 use clap::{ArgGroup, Parser};
+use crossterm::event;
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 use inquire::formatter::StringFormatter;
 use itertools::Itertools;
+use neptis_lib::db::sync_models::{TransferJobDto, TransferJobStatus};
 use neptis_lib::get_working_dir;
 
 #[derive(Parser, Debug)]

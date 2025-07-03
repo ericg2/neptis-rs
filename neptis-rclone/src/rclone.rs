@@ -1,12 +1,17 @@
-﻿use crate::api::dtos::{PostForAutoScheduleStartDto, TransferJobDto};
-use crate::errors::ApiError;
+﻿use crate::errors::ApiError;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use chrono::Utc;
 use cron::{Schedule, TimeUnitSpec};
 use duct::cmd;
-use neptis_lib::db::sync_models::{RCloneMessage, RCloneStat, TransferJob, TransferJobStatus};
-use neptis_lib::prelude::{DbController, TransferJobInternalDto};
+use neptis_lib::apis::NeptisError;
+use neptis_lib::db::sync_models::{
+    RCloneMessage, RCloneStat, TransferJob, TransferJobDto, TransferJobStatus,
+};
+use neptis_lib::prelude::{
+    DbController, PostForAutoScheduleStartDto, TransferJobInternalDto, WebApi,
+};
+use neptis_lib::rolling_secret::RollingSecret;
 use rocket::futures::task::Spawn;
 use rocket::yansi::Paint;
 use std::io::{BufRead, BufReader};
@@ -66,7 +71,8 @@ pub struct RCloneJobLaunchInfo {
     pub smb_password: String,
     pub local_folder: String,
     pub smb_folder: String,
-    pub auto_job: Option<String>,
+    pub auto_job_schedule_name: Option<String>,
+    pub auto_job_action_name: Option<String>,
 }
 
 impl RCloneJobLaunchInfo {
@@ -107,7 +113,8 @@ impl RCloneJobLaunchInfo {
             smb_password: password.into(),
             local_folder: local_folder.into(),
             smb_folder: remote_folder.into(),
-            auto_job: None,
+            auto_job_schedule_name: None,
+            auto_job_action_name: None,
         }
     }
 }
@@ -117,6 +124,7 @@ pub struct RCloneClient {
     db: Arc<DbController>,
     start_tx: Mutex<Option<Sender<PostForAutoScheduleStartDto>>>,
     _jobs: Arc<Mutex<Vec<TransferJob>>>,
+    rt: Arc<Runtime>,
 }
 
 impl RCloneClient {
@@ -131,6 +139,21 @@ impl RCloneClient {
             }
         }
         Ok(_lock)
+    }
+
+    async fn _get_jobs_async(&self) -> Result<Vec<TransferJobDto>, ApiError> {
+        let db_jobs = self.db.get_all_transfer_jobs_internal().await?;
+        let all_jobs = {
+            let mut _lock = self._jobs.lock().unwrap();
+            let saved_jobs = &mut *_lock;
+            for db_job in db_jobs {
+                if !saved_jobs.iter().any(|x| x.dto.job_id == db_job.job_id) {
+                    saved_jobs.push(db_job.into());
+                }
+            }
+            saved_jobs.iter().map(|x|x.into()).collect::<Vec<_>>()
+        };
+        Ok(all_jobs)
     }
 
     fn _save_jobs(&self) -> Result<(), ApiError> {
@@ -203,6 +226,7 @@ impl RCloneClient {
         &self,
         start_rx: &Receiver<PostForAutoScheduleStartDto>,
     ) -> Result<(), ApiError> {
+        println!("*** Thread loop beginning...");
         let mut start_jobs = vec![];
         loop {
             match start_rx.try_recv() {
@@ -210,12 +234,17 @@ impl RCloneClient {
                 Err(_) => break,
             }
         }
+        println!("> Found {} immediate start jobs from TX", start_jobs.len());
         let all_schedules = self.db.get_all_transfer_auto_schedules_sync()?;
         let mut all_infos = vec![];
         {
             // We need to keep the `all_jobs` variable in a separate scope due to locking.
             let all_jobs = self._get_jobs_locked()?;
             for job in self.db.get_all_transfer_auto_jobs_sync()? {
+                println!(
+                    "> Checking {}/{}/{}",
+                    job.server_name, job.schedule_name, job.action_name
+                );
                 // Find the schedule and see if a job is currently running or not.
                 if let Some((job_schedule, cron_schedule)) = all_schedules
                     .iter()
@@ -229,16 +258,15 @@ impl RCloneClient {
                         .iter()
                         .filter(|x| {
                             x.dto.server_name == job.server_name
-                                && x.dto.smb_folder == job.smb_folder
-                                && x.dto.local_folder == job.local_folder
-                                && x.dto.auto_job == Some(job.action_name.clone())
+                                && x.dto.auto_job_action_name == Some(job.action_name.clone())
+                                && x.dto.auto_job_schedule_name == Some(job.schedule_name.clone())
                         })
                         .collect::<Vec<_>>();
                     if related_jobs
                         .iter()
                         .any(|x| x.status() == TransferJobStatus::Running)
                     {
-                        println!("Job is currently running. Skipping...");
+                        println!("> Job is currently running. Skipping...");
                         continue;
                     }
                     let now = Utc::now();
@@ -247,29 +275,42 @@ impl RCloneClient {
                         .filter_map(|x| x.dto.end_date.or(x.dto.start_date))
                         .max()
                         .map(|dt| dt.and_utc())
-                        .unwrap_or(job_schedule.date_created.0);
+                        .unwrap_or(job_schedule.last_updated.and_utc());
 
-                    
-                    if cron_schedule
-                        .after(&last_ran)
-                        .any(|next_run| now >= next_run)
+                    let next_run = cron_schedule.after(&last_ran).next();
+                    println!("> Last ran = {}", last_ran);
+
+                    let mut do_run = false;
+                    if let Some(next_run) = next_run {
+                        println!("> Next run = {}", next_run);
+                        do_run = now >= next_run;
+                    } else {
+                        println!("> Next run = NONE");
+                    }
+
+                    if do_run
                         || start_jobs.iter().any(|x| {
                             job_schedule.server_name == x.server_name
                                 && job_schedule.schedule_name == x.schedule_name
                         })
                     {
+                        println!("> Run is desired. Adding to start list...");
                         all_infos.push(RCloneJobLaunchInfo {
                             server_name: job.server_name.clone(),
                             smb_user_name: job_schedule.smb_user_name.clone(),
                             smb_password: job_schedule.smb_password.clone(),
                             local_folder: job.local_folder.clone(),
                             smb_folder: job.smb_folder.clone(),
-                            auto_job: Some(job.action_name.clone()),
+                            auto_job_schedule_name: Some(job.schedule_name.clone()),
+                            auto_job_action_name: Some(job.action_name.clone()),
                         });
+                    } else {
+                        println!("> Not meeting run schedule. Skipping...");
                     }
                 }
             }
         }
+
         for info in all_infos {
             self.create_and_start_job(&info)?;
         }
@@ -298,6 +339,8 @@ impl RCloneClient {
         job_id: Uuid,
         cmd: duct::Expression,
         jobs: Arc<Mutex<Vec<TransferJob>>>,
+        db: Arc<DbController>,
+        rt: Arc<Runtime>,
         s_rx: Receiver<()>,
         r_tx: Sender<bool>,
     ) {
@@ -311,8 +354,10 @@ impl RCloneClient {
             if !msg.is_empty() {
                 if fatal {
                     job.dto.fatal_errors.push(msg.into());
+                    println!("Adding error '{}' to {}", msg, job.dto.job_id);
                 } else {
                     job.dto.warnings.push(msg.into());
+                    println!("Adding warning '{}' to {}", msg, job.dto.job_id);
                 }
             }
             if let Some(stat) = stat {
@@ -324,9 +369,67 @@ impl RCloneClient {
                 job._thread = None;
                 job._cancel_tx = None;
                 job._cancel_rx = None;
+                println!("> Ending job {}", job.dto.job_id);
             }
             job.dto.last_updated = current_now;
+            let _ = db.save_transfer_job_internal_sync(&job.dto);
         };
+
+        // DO NOT ATTEMPT
+        if let Some(server_item) = {
+            let server_name = {
+                let _lock = &mut *jobs.lock().unwrap();
+                _lock
+                    .iter_mut()
+                    .find(|x| x.dto.job_id == job_id)
+                    .expect("Expected job to exist after creation!")
+                    .dto
+                    .server_name
+                    .clone()
+            };
+            db.get_all_servers_sync()
+                .ok()
+                .and_then(|x| x.into_iter().find(|x| x.server_name == server_name))
+        } && let Some(test_name) = server_item.user_name
+            && let Some(test_pass) = server_item.user_password
+        {
+            // This feature took 10 years to get...
+            if let Some(arduino_ep) = server_item.arduino_endpoint
+                && let Some(arduino_pass) = server_item.arduino_password
+            {
+                for _ in 0..3 {
+                    if rt
+                        .block_on(async { WebApi::wake_pc(&arduino_ep, &arduino_pass).await })
+                        .is_ok()
+                    {
+                        break;
+                    }
+                    thread::sleep(Duration::from_secs(2));
+                }
+            }
+            let mut res = Err(NeptisError::Str("Failed to connect to server!".into()));
+            for _ in 0..2 {
+                let api = WebApi::new(
+                    &server_item.server_endpoint,
+                    &test_name,
+                    &test_pass,
+                    server_item
+                        .server_password
+                        .clone()
+                        .and_then(|x| RollingSecret::from_string(&x)),
+                );
+                res = rt.block_on(async move { api.get_info().await });
+                if res.is_ok() {
+                    break;
+                }
+                thread::sleep(Duration::from_secs(2));
+            }
+            if let Err(e) = res {
+                mark_message(&e.to_string(), true, None);
+                return;
+            }
+        }
+
         match cmd.reader() {
             Ok(handle) => {
                 let rdr = BufReader::new(&handle);
@@ -339,14 +442,14 @@ impl RCloneClient {
                             println!();
                             match serde_json::from_str::<RCloneMessage>(&unescaped) {
                                 Ok(msg) => {
-                                    mark_message("", false, Some(msg.stats));
+                                    mark_message("", false, msg.stats);
                                 }
                                 Err(e) => println!("Json Error: {e}"),
                             }
                         }
                         Err(e) => {
-                            let msg = &format!("Failed to read line! Error: {e}");
-                            mark_message(msg, false, None);
+                            //let msg = &format!("Failed to read line! Error: {e}");
+                            //mark_message(msg, false, None);
                         }
                     }
                     // If we are receiving a KILL request - process it here!
@@ -508,6 +611,8 @@ impl RCloneClient {
 
         // Set the start date and attempt to pass it off to the thread.
         let jobs = self._jobs.clone();
+        let rt = self.rt.clone();
+        let db = self.db.clone();
         let (s_tx, s_rx) = channel::<()>();
         let (r_tx, r_rx) = channel::<bool>();
         job.dto.start_date = Some(Utc::now().naive_utc());
@@ -517,9 +622,21 @@ impl RCloneClient {
         job._cancel_tx = Some(s_tx);
         job._cancel_rx = Some(r_rx);
         job._thread = Some(thread::spawn(move || {
-            Self::_handle_job(job_id, cmd_exp, jobs, s_rx, r_tx)
+            Self::_handle_job(job_id, cmd_exp, jobs, db, rt, s_rx, r_tx)
         }));
         Ok(())
+    }
+
+    pub fn start_auto_job(&self, info: PostForAutoScheduleStartDto) -> Result<(), ApiError> {
+        let _lock = &*self.start_tx.lock().unwrap();
+        if let Some(tx) = _lock {
+            tx.send(info)
+                .map_err(|e| ApiError::InternalError(e.to_string()))
+        } else {
+            Err(ApiError::InternalError(
+                "IPC starter is not running!".into(),
+            ))
+        }
     }
 
     pub fn cancel_job(&self, job_id: Uuid) -> Result<(), ApiError> {
@@ -573,7 +690,8 @@ impl RCloneClient {
             y.push(TransferJob {
                 dto: TransferJobInternalDto {
                     job_id,
-                    auto_job: info.auto_job,
+                    auto_job_action_name: info.auto_job_action_name,
+                    auto_job_schedule_name: info.auto_job_schedule_name,
                     server_name: server.server_name,
                     smb_user_name: info.smb_user_name.clone(),
                     smb_password: info.smb_password.clone(),
@@ -594,20 +712,24 @@ impl RCloneClient {
         Ok(job_id)
     }
 
-    pub fn get_job(&self, job_id: Uuid) -> Option<TransferJobDto> {
-        let _lock = self._get_jobs_locked().ok()?;
+    pub async fn get_job(&self, job_id: Uuid) -> Option<TransferJobDto> {
+        let _lock = self._get_jobs_async().await.ok()?;
         _lock
-            .iter()
-            .find(|x| x.dto.job_id == job_id)
-            .map(|x| x.into())
+            .into_iter()
+            .find(|x| x.job_id == job_id)
     }
 
-    pub fn new(settings: RCloneSettings, db: Arc<DbController>) -> Self {
+    pub async fn get_all_jobs(&self) -> Option<Vec<TransferJobDto>> {
+        self._get_jobs_async().await.ok()
+    }
+
+    pub fn new(settings: RCloneSettings, db: Arc<DbController>, rt: Arc<Runtime>) -> Self {
         Self {
             settings,
             db,
             start_tx: Mutex::new(None),
             _jobs: Arc::new(Mutex::new(vec![])),
+            rt,
         }
     }
 }

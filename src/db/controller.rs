@@ -153,7 +153,8 @@ impl DbController {
             SET
                 cron_schedule = ?,
                 smb_user_name = ?,
-                smb_password = ?
+                smb_password = ?,
+                last_updated = ?
             WHERE
                 schedule_name = ?
             AND
@@ -162,6 +163,7 @@ impl DbController {
             schedule.cron_schedule,
             schedule.smb_user_name,
             schedule.smb_password,
+            schedule.last_updated,
             schedule.schedule_name,
             schedule.server_name
         )
@@ -177,14 +179,16 @@ impl DbController {
                     server_name,
                     cron_schedule,
                     smb_user_name,
-                    smb_password
-                ) VALUES (?, ?, ?, ?, ?)
+                    smb_password,
+                    last_updated
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
                 schedule.schedule_name,
                 schedule.server_name,
                 schedule.cron_schedule,
                 schedule.smb_user_name,
-                schedule.smb_password
+                schedule.smb_password,
+                schedule.last_updated,
             )
             .execute(&self.pool)
             .await?;
@@ -362,7 +366,8 @@ impl DbController {
             r#"
         UPDATE transfer_jobs_internal
         SET
-            auto_job = ?,
+            auto_job_action_name = ?,
+            auto_job_schedule_name = ?,
             server_name = ?,
             smb_user_name = ?,
             smb_password = ?,
@@ -377,7 +382,8 @@ impl DbController {
         WHERE
             job_id = ?
         "#,
-            job.auto_job,
+            job.auto_job_action_name,
+            job.auto_job_schedule_name,
             job.server_name,
             job.smb_user_name,
             job.smb_password,
@@ -400,7 +406,8 @@ impl DbController {
                 r#"
             INSERT INTO transfer_jobs_internal (
                 job_id,
-                auto_job,
+                auto_job_schedule_name,
+                auto_job_action_name,
                 server_name,
                 smb_user_name,
                 smb_password,
@@ -412,10 +419,11 @@ impl DbController {
                 fatal_errors,
                 warnings,
                 last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
                 job.job_id,
-                job.auto_job,
+                job.auto_job_schedule_name,
+                job.auto_job_action_name,
                 job.server_name,
                 job.smb_user_name,
                 job.smb_password,

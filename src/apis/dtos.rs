@@ -7,10 +7,11 @@ use std::{
 use chrono::{DateTime, Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
+use crate::db::sync_models::{RCloneStat, TransferJobStatus};
 use crate::traits::ToShortIdString;
 
 use super::{NeptisError, api::PointUsage};
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AutoJobType {
@@ -191,6 +192,12 @@ impl ToShortIdString for RepoJobDto {
             self.errors.len()
         )
     }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PostForAutoScheduleStartDto {
+    pub server_name: String,
+    pub schedule_name: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

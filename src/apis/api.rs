@@ -16,7 +16,9 @@ use std::time::Duration;
  */
 use super::dtos::*;
 use crate::apis::NeptisError;
+use crate::db::sync_models::TransferJobDto;
 use crate::file_size::FileSize;
+use crate::prelude::ArduinoSecret;
 use crate::rolling_secret::RollingSecret;
 use crate::traits::ToShortIdString;
 use base64::engine::Config;
@@ -483,6 +485,8 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U> {
     }
 }
 
+pub const IPC_PORT: u16 = 64511;
+
 pub struct WebApi {
     config: WebApiConfig,
     user_name: String,
@@ -506,6 +510,84 @@ impl ToString for WebApi {
 impl WebApi {
     pub fn get_username(&self) -> String {
         self.user_name.clone()
+    }
+
+    pub async fn ipc_ping() -> Result<(), NeptisError> {
+        Ok(reqwest::ClientBuilder::new()
+            .build()?
+            .get(format!("http://127.0.0.1:{}/ping", IPC_PORT))
+            .send()
+            .await?
+            .error_for_status()
+            .map(|_| ())?)
+    }
+
+    pub async fn ipc_cancel_job(id: Uuid) -> Result<(), NeptisError> {
+        Ok(reqwest::ClientBuilder::new()
+            .build()?
+            .delete(format!(
+                "http://127.0.0.1:{}/jobs/{}",
+                IPC_PORT,
+                id.to_string()
+            ))
+            .send()
+            .await?
+            .error_for_status()
+            .map(|_| ())?)
+    }
+
+    pub async fn ipc_get_jobs() -> Result<Vec<TransferJobDto>, NeptisError> {
+        Ok(reqwest::ClientBuilder::new()
+            .build()?
+            .get(format!("http://127.0.0.1:{}/jobs", IPC_PORT))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?)
+    }
+
+    pub async fn ipc_get_job(id: Uuid) -> Result<TransferJobDto, NeptisError> {
+        Ok(reqwest::ClientBuilder::new()
+            .build()?
+            .get(format!("http://127.0.0.1:{}/jobs/{}", IPC_PORT, id.to_string()))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?)
+    }
+
+
+    pub async fn ipc_start_auto_job(dto: PostForAutoScheduleStartDto) -> Result<(), NeptisError> {
+        Ok(reqwest::ClientBuilder::new()
+            .build()?
+            .post(format!("http://127.0.0.1:{}/jobs/start", IPC_PORT))
+            .json(&dto)
+            .send()
+            .await?
+            .error_for_status()
+            .map(|_| ())?)
+    }
+
+    pub async fn wake_pc(
+        arduino_ep: impl AsRef<str>,
+        arduino_pass: impl AsRef<str>,
+    ) -> Result<(), NeptisError> {
+        let arduino_ep_str = arduino_ep.as_ref();
+        let arduino_pass_str = arduino_pass.as_ref();
+        let key = ArduinoSecret::from_string(arduino_pass_str)
+            .ok_or(NeptisError::Str("Failed to parse Arduino Key".into()))?
+            .rolling_key()
+            .ok_or(NeptisError::Str("Failed to calculate next key!".into()))?;
+        Ok(reqwest::ClientBuilder::new()
+            .build()?
+            .post(format!("{}/{}", arduino_ep_str, "start"))
+            .bearer_auth(key.to_string())
+            .send()
+            .await?
+            .error_for_status()
+            .map(|_| ())?)
     }
 
     async fn ensure_auth(&self) -> Result<(), NeptisError> {

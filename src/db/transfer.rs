@@ -12,7 +12,7 @@ pub struct TransferAutoSchedule {
     pub cron_schedule: String,
     pub smb_user_name: String,
     pub smb_password: String,
-    pub date_created: Json<DateTime<Utc>>,
+    pub last_updated: NaiveDateTime
 }
 
 #[derive(Clone, FromRow, Eq, PartialEq)]
@@ -24,33 +24,16 @@ pub struct TransferAutoJob {
     pub local_folder: String,
 }
 
-// #[derive(Clone, FromRow, PartialEq)]
-// pub struct TransferJobInternalDto {
-//     pub job_id: Uuid,
-//     pub auto_job: Option<String>,
-//     pub server_name: String,
-//     pub smb_user_name: String,
-//     pub smb_password: String,
-//     pub smb_folder: String,
-//     pub local_folder: String,
-//     pub last_stats: Option<RCloneStat>,
-//     pub start_date: Option<NaiveDateTime>,
-//     pub end_date: Option<NaiveDateTime>,
-//     pub fatal_errors: Vec<String>,
-//     pub warnings: Vec<String>,
-//     pub last_updated: NaiveDateTime,
-// }
-
 #[derive(Clone, FromRow, PartialEq)]
 pub struct TransferJobInternalDto {
     pub job_id: Uuid,
-    pub auto_job: Option<String>,
+    pub auto_job_action_name: Option<String>,
+    pub auto_job_schedule_name: Option<String>,
     pub server_name: String,
     pub smb_user_name: String,
     pub smb_password: String,
     pub smb_folder: String,
     pub local_folder: String,
-
     pub last_stats: Option<Json<RCloneStat>>,
     pub start_date: Option<NaiveDateTime>,
     pub end_date: Option<NaiveDateTime>,
@@ -58,3 +41,4 @@ pub struct TransferJobInternalDto {
     pub warnings: Json<Vec<String>>,
     pub last_updated: NaiveDateTime,
 }
+
