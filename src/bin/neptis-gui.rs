@@ -8,10 +8,6 @@ extern crate serde_json;
 extern crate serde_repr;
 extern crate url;
 
-pub mod ui;
-
-use neptis_lib::prelude::*;
-
 use axoupdater::{
     AxoUpdater, AxoupdateError, ReleaseSource, ReleaseSourceType, UpdateRequest, Version,
 };
@@ -24,11 +20,9 @@ use std::ffi::OsStr;
 use std::iter::once;
 use std::process;
 use std::str::FromStr;
-use ui::browser::FileBrowser;
 use uuid::Uuid;
 
-use inquire::{Confirm, CustomType, Password, Select, Text, required, validator::Validation};
-use rolling_secret::RollingSecret;
+use inquire::{required, validator::Validation, Confirm, CustomType, Password, Select, Text};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::sync::RwLock;
@@ -43,9 +37,6 @@ use std::{
 };
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
-use ui::manager::{
-    ApiContext, ModelExtraOption, ModelManager, ModelProperty, PromptResult, PropGetType,
-};
 use url::Url;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -1818,7 +1809,7 @@ impl UiApp {
                 .unwrap_or("Failed to calculate Data Total File Usage".into());
             (
                 format!(
-                    "Logged in as {}\nPrivledged: {}\n{}",
+                    "Logged in as {}\nPrivileged: {}\n{}",
                     user.user_name.as_str(),
                     if user.is_admin { "Yes" } else { "No" },
                     usage_str
@@ -1830,6 +1821,7 @@ impl UiApp {
         }
     }
 
+    //noinspection ALL
     async fn _ensure_job_good(api: &WebApi, id: Uuid) -> Result<(), NeptisError> {
         println!(
             "**** Sent request. Server responded with Job #{:.6}...",
@@ -2473,7 +2465,7 @@ impl UiApp {
                                     is_admin: Some(dto.is_admin),
                                     max_data_bytes: Some(dto.max_data_bytes as i64),
                                     max_snapshot_bytes: Some(dto.max_repo_bytes as i64),
-                                    password: None, // password will be set seperately
+                                    password: None, // password will be set separately
                                 },
                             )
                             .await
@@ -3232,6 +3224,7 @@ impl UiApp {
         menu_items.push(STR_LOGOUT);
 
         // Show menu
+        #[allow(unreachable_patterns)]
         match Select::new("Please select an action", menu_items)
             .prompt_skippable()
             .expect("Failed to show prompt!")
@@ -3864,14 +3857,19 @@ impl UiApp {
     }
 }
 
-use crate::ui::browser::FileBrowserMode;
 use clap::{ArgGroup, Parser};
 use crossterm::event;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use inquire::formatter::StringFormatter;
 use itertools::Itertools;
-use neptis_lib::db::sync_models::{TransferJobDto, TransferJobStatus};
-use neptis_lib::get_working_dir;
+use neptis_rs::db::sync_models::{TransferJobDto};
+use neptis_rs::get_working_dir;
+use neptis_rs::db::sync_models::TransferJobStatus;
+use neptis_rs::prelude::{AlertMode, AlertTrigger, ArduinoSecret, AutoJobDto, AutoJobType, DbController, FileSize, JobStatus, JobType, NeptisError, NeptisFS, PostForAutoScheduleStartDto, PostForMessageApi, PostForSubscriptionApi, PutForAutoJobWebApi, PutForMountApi, PutForSubscriptionApi, RepoJobDto, ServerItem, SnapshotFileDto, SubscriptionDto, TransferAutoJob, TransferAutoSchedule, UserDto, UserForCreateApi, UserForUpdateApi, WebApi};
+use neptis_rs::rolling_secret::RollingSecret;
+use neptis_rs::traits::ToShortIdString;
+use neptis_rs::ui::browser::{FileBrowser, FileBrowserMode};
+use neptis_rs::ui::manager::{ModelManager, ModelProperty, PromptResult};
 
 #[derive(Parser, Debug)]
 #[command(name = "Neptis")]

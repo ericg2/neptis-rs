@@ -1,17 +1,8 @@
-﻿use crate::errors::ApiError;
-use base64::Engine;
+﻿use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use chrono::Utc;
 use cron::Schedule;
 use duct::cmd;
-use neptis_lib::apis::NeptisError;
-use neptis_lib::db::sync_models::{
-    RCloneMessage, RCloneStat, TransferJob, TransferJobDto, TransferJobStatus,
-};
-use neptis_lib::prelude::{
-    DbController, PostForAutoScheduleStartDto, TransferJobInternalDto, WebApi,
-};
-use neptis_lib::rolling_secret::RollingSecret;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::path::Path;
@@ -26,10 +17,16 @@ use std::{
     sync::Arc,
     thread,
 };
+use rocket::futures::task::Spawn;
 use tokio::runtime::Runtime;
 use url::Url;
 use uuid::Uuid;
 use zip::ZipArchive;
+use crate::apis::NeptisError;
+use crate::db::sync_models::{RCloneMessage, RCloneStat, TransferJob, TransferJobDto, TransferJobStatus};
+use crate::ipc::errors::ApiError;
+use crate::prelude::{DbController, PostForAutoScheduleStartDto, TransferJobInternalDto, WebApi};
+use crate::rolling_secret::RollingSecret;
 
 #[cfg(target_os = "windows")]
 const DOWNLOAD_URL: &'static str = "https://downloads.rclone.org/rclone-current-windows-amd64.zip";

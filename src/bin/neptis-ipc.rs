@@ -1,16 +1,11 @@
-use crate::rclone::{RCloneClient, RCloneSettings};
-use neptis_lib::prelude::{DbController, IPC_PORT};
+use neptis_rs::prelude::{DbController, IPC_PORT};
 use rocket::{catch, catchers, get, routes, Config};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::thread;
 use tokio::runtime::Runtime;
-
-mod errors;
-mod macros;
-mod rclone;
-mod schema;
-mod handlers;
+use neptis_rs::ipc::handlers;
+use neptis_rs::ipc::rclone::{RCloneClient, RCloneSettings};
 
 #[get("/")]
 fn ping() -> &'static str {
@@ -20,7 +15,7 @@ fn ping() -> &'static str {
 #[rocket::launch]
 fn rocket() -> _ {
     let rt = Arc::new(Runtime::new().unwrap());
-    let settings = RCloneSettings::new(neptis_lib::get_working_dir());
+    let settings = RCloneSettings::new(neptis_rs::get_working_dir());
     let db = Arc::new(DbController::new(rt.clone()));
     let client = Arc::new(RCloneClient::new(settings, db, rt.clone()));
 

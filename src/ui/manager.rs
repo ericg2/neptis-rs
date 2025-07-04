@@ -13,10 +13,7 @@ use inquire::{
 };
 use tokio::runtime::Runtime;
 
-use crate::{
-    UiApp};
-
-use neptis_lib::prelude::*;
+use crate::prelude::*;
 
 pub struct ModelProperty<T, A> {
     name: String,

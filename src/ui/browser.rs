@@ -13,8 +13,10 @@ use chrono::{DateTime, Local};
 use indexmap::IndexMap;
 use inquire::{Confirm, Editor, Select, Text, required, validator::Validation};
 use itertools::Itertools;
-
-use neptis_lib::{prelude::*, to_dto_time};
+use crate::file_size::FileSize;
+use crate::filesystem::{FsNode, NeptisFS};
+use crate::prelude::GenericFileType;
+use crate::to_dto_time;
 
 pub struct FileBrowser {
     fs: NeptisFS,
@@ -397,8 +399,8 @@ impl FileBrowser {
             match self.fs.do_readdir(&sel_path).map(|x| {
                 x.into_iter()
                     .filter(|x| {
-                        x.path != PathBuf::from(".")
-                            && x.path != PathBuf::from("..")
+                        x.path != PathBuf::from("../..")
+                            && x.path != PathBuf::from("../../..")
                             && x.path.to_str().unwrap().trim() != ""
                     })
                     .sorted_by(|a, b| {

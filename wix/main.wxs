@@ -61,7 +61,7 @@
     <Product
         Id='*'
         Name='neptis-rs'
-        UpgradeCode='9185F821-9B3C-4F50-8B0A-BF563D14ED35'
+        UpgradeCode='BBC2D962-93AC-473C-AB24-21808CB3DF6A'
         Manufacturer='Eric E. Gold'
         Language='1033'
         Codepage='1252'
@@ -69,7 +69,7 @@
 
         <Package Id='*'
             Keywords='Installer'
-            Description='The Future of Backup and Control'
+            Description='Neptis Front End'
             Manufacturer='Eric E. Gold'
             InstallerVersion='450'
             Languages='1033'
@@ -110,7 +110,7 @@
                     -->
 
                     <Directory Id='Bin' Name='bin'>
-                        <Component Id='Path' Guid='26979834-DCCF-4816-9F68-EB5E900E1DAE' KeyPath='yes'>
+                        <Component Id='Path' Guid='CAE94F7A-36FA-459A-A04C-8CDDAB8B380B' KeyPath='yes'>
                             <Environment
                                 Id='PATH'
                                 Name='PATH'
@@ -123,9 +123,17 @@
                         <Component Id='binary0' Guid='*'>
                             <File
                                 Id='exe0'
-                                Name='neptis-rs.exe'
+                                Name='neptis-gui.exe'
                                 DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\neptis-rs.exe'
+                                Source='$(var.CargoTargetBinDir)\neptis-gui.exe'
+                                KeyPath='yes'/>
+                        </Component>
+                        <Component Id='binary1' Guid='*'>
+                            <File
+                                Id='exe1'
+                                Name='neptis-ipc.exe'
+                                DiskId='1'
+                                Source='$(var.CargoTargetBinDir)\neptis-ipc.exe'
                                 KeyPath='yes'/>
                         </Component>
                     </Directory>
@@ -150,6 +158,7 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='binary1'/>
 
             <Feature
                 Id='Environment'
@@ -173,7 +182,7 @@
         <!--<Icon Id='ProductICO' SourceFile='wix\Product.ico'/>-->
         <!--<Property Id='ARPPRODUCTICON' Value='ProductICO' />-->
 
-        <Property Id='ARPHELPLINK' Value='https://ericg2.github.io'/>
+        <Property Id='ARPHELPLINK' Value='https://github.com/ericg2/neptis-rs'/>
         
         <UI>
             <UIRef Id='WixUI_FeatureTree'/>

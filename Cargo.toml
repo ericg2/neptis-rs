@@ -1,20 +1,26 @@
-[workspace]
-members = ["neptis-rclone", "neptis-gui"]
-resolver = "3"
-
 [package]
-name = "neptis-lib"
-version = "0.1.0"
+name = "neptis-rs"
+version = "1.2.5"
 edition = "2024"
 repository = "https://github.com/ericg2/neptis-rs"
 authors = ["Eric E. Gold"]
-description = "Neptis Library"
+description = "Neptis Front End"
 rust-version = "1.88.0"
+
+[package.metadata.wix]
+upgrade-guid = "BBC2D962-93AC-473C-AB24-21808CB3DF6A"
+path-guid = "CAE94F7A-36FA-459A-A04C-8CDDAB8B380B"
+license = false
+eula = false
+
+[lib]
+path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 serde_with = "3.12"
+serde_repr = "0.1.20"
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "json",
@@ -28,6 +34,8 @@ aes = "0.8.4"
 cbc = { version = "0.1.2", features = ["alloc"] }
 totp-rs = { version = "5.7", features = ["gen_secret", "serde_support"] }
 chrono = { version = "0.4", features = ["serde"] }
+cron = { version = "0.15.0", features = ["serde"]}
+clearscreen = "4.0.2"
 cron-descriptor = "0.1.1"
 totp-lite = "2.0.1"
 libc = "*"
@@ -39,6 +47,16 @@ reqwest-middleware = "0.4"
 zip = "4"
 base64 = "0.22.1"
 url = "2.5"
+rocket = { version = "0.5", features = ["uuid", "json"] }
+thiserror = "2.0.12"
+duct = "1"
+inquire = { version = "0.7.5", features = ["editor"] }
+axoupdater = { version = "0.9", features = ["blocking"] }
+crossterm = "0.29.0"
+regex = "1.11.1"
+clap = { version = "4.5.40", features = ["derive"] }
+itertools = "0.14.0"
+indexmap = "2.10.0"
 
 [target.'cfg(unix)'.dependencies]
 fuse_mt = "0.6"

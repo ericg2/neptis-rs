@@ -10,6 +10,8 @@ pub mod macros;
 pub mod models;
 pub mod rolling_secret;
 pub mod traits;
+pub mod ui;
+pub mod ipc;
 
 #[allow(ambiguous_glob_reexports)]
 pub mod prelude {

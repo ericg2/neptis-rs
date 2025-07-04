@@ -1,14 +1,14 @@
-﻿use crate::errors::ApiError;
-use crate::rclone::RCloneClient;
-use neptis_lib::db::sync_models::TransferJobDto;
-use neptis_lib::prelude::PostForAutoScheduleStartDto;
-use rocket::State;
+﻿use rocket::State;
 use rocket::serde::json::Json;
 use rocket::{Route, routes};
 use rocket::{delete, get, post};
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
+use crate::db::sync_models::TransferJobDto;
+use crate::ipc::errors::ApiError;
+use crate::ipc::rclone::RCloneClient;
+use crate::prelude::PostForAutoScheduleStartDto;
 
 #[get("/<id>")]
 async fn get_one_job(
