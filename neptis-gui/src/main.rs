@@ -3838,9 +3838,9 @@ impl UiApp {
     }
 
     #[cfg(unix)]
-    pub fn new(db_path: Option<String>, mnt: Option<String>) -> UiApp {
+    pub fn new(mnt: Option<String>) -> UiApp {
         let rt = Arc::new(Runtime::new().expect("Expected Runtime to start!"));
-        let db = DbController::new(rt.clone(), &Self::get_db(db_path));
+        let db = DbController::new(rt.clone());
         UiApp {
             rt: rt.clone(),
             api: Arc::new(RwLock::new(None)),
@@ -3923,7 +3923,7 @@ pub fn main() {
     }
 
     #[cfg(unix)]
-    let app = UiApp::new(args.db, args.default_fuse);
+    let app = UiApp::new(args.default_fuse);
 
     #[cfg(not(unix))]
     let app = UiApp::new();

@@ -416,24 +416,63 @@ impl From<GenericFileAttr> for FileAttr {
 
 #[cfg(unix)]
 impl FilesystemMT for NeptisFS {
-    fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
-        // Attempt to read the entire directory.
-        let ret = self
-            .do_readdir(path)
-            .map(|y| {
-                y.into_iter()
-                    .map(|x| DirectoryEntry {
-                        name: x.path.into_os_string(),
-                        kind: x.attr.kind.into(),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .ok_or(libc::ENETUNREACH)?;
-        Ok(ret)
-    }
-
     fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
         self.do_find(path).map(|x| (FS_DURATION, x.attr.into()))
+    }
+
+    fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
+        self.do_write(path, None, None, None, None, None, Some(size))
+            .ok_or(libc::ENETUNREACH)
+    }
+
+    fn utimens(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        _fh: Option<u64>,
+        atime: Option<std::time::SystemTime>,
+        mtime: Option<std::time::SystemTime>,
+    ) -> ResultEmpty {
+        self.do_write(path, None, None, None, atime, mtime, None)
+            .ok_or(libc::ENETUNREACH)
+    }
+
+    fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, _mode: u32) -> ResultEntry {
+        let path = parent.join(name);
+        self.do_create(&path, true).ok_or(libc::ENETUNREACH)?;
+        self.do_find(&path).map(|x| (FS_DURATION, x.attr.into()))
+    }
+
+    fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+        self.do_delete(&parent.join(name)).ok_or(libc::ENETUNREACH)
+    }
+
+    fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+        self.do_delete(&parent.join(name)).ok_or(libc::ENETUNREACH)
+    }
+
+    fn rename(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        newparent: &Path,
+        newname: &OsStr,
+    ) -> ResultEmpty {
+        self.do_write(
+            &parent.join(name),
+            Some(&newparent.join(newname)),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .ok_or(libc::ENETUNREACH)
+    }
+
+    fn open(&self, _req: RequestInfo, _path: &Path, _flags: u32) -> ResultOpen {
+        Ok((42, _flags))
     }
 
     fn read(
@@ -458,34 +497,6 @@ impl FilesystemMT for NeptisFS {
         }
     }
 
-    fn open(&self, _req: RequestInfo, _path: &Path, _flags: u32) -> ResultOpen {
-        Ok((42, _flags))
-    }
-
-    fn opendir(&self, _req: RequestInfo, _path: &Path, _flags: u32) -> ResultOpen {
-        Ok((42, _flags))
-    }
-
-    fn release(
-        &self,
-        _req: RequestInfo,
-        _path: &Path,
-        _fh: u64,
-        _flags: u32,
-        _lock_owner: u64,
-        _flush: bool,
-    ) -> ResultEmpty {
-        Ok(())
-    }
-
-    fn releasedir(&self, _req: RequestInfo, _path: &Path, _fh: u64, _flags: u32) -> ResultEmpty {
-        Ok(())
-    }
-
-    fn access(&self, _req: RequestInfo, _path: &Path, _mask: u32) -> ResultEmpty {
-        Ok(())
-    }
-
     fn write(
         &self,
         _req: RequestInfo,
@@ -508,6 +519,54 @@ impl FilesystemMT for NeptisFS {
         .ok_or(libc::ENETUNREACH)
     }
 
+    fn release(
+        &self,
+        _req: RequestInfo,
+        _path: &Path,
+        _fh: u64,
+        _flags: u32,
+        _lock_owner: u64,
+        _flush: bool,
+    ) -> ResultEmpty {
+        Ok(())
+    }
+
+    fn fsync(&self, _req: RequestInfo, _path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
+        Ok(())
+    }
+
+    fn opendir(&self, _req: RequestInfo, _path: &Path, _flags: u32) -> ResultOpen {
+        Ok((42, _flags))
+    }
+
+    fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
+        // Attempt to read the entire directory.
+        let ret = self
+            .do_readdir(path)
+            .map(|y| {
+                y.into_iter()
+                    .map(|x| DirectoryEntry {
+                        name: x.path.into_os_string(),
+                        kind: x.attr.kind.into(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .ok_or(libc::ENETUNREACH)?;
+        Ok(ret)
+    }
+
+    fn releasedir(&self, _req: RequestInfo, _path: &Path, _fh: u64, _flags: u32) -> ResultEmpty {
+        Ok(())
+    }
+
+    fn fsyncdir(&self, _req: RequestInfo, _path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
+        Ok(())
+    }
+
+    fn access(&self, _req: RequestInfo, _path: &Path, _mask: u32) -> ResultEmpty {
+        Ok(())
+    }
+
     fn create(
         &self,
         _req: RequestInfo,
@@ -524,64 +583,5 @@ impl FilesystemMT for NeptisFS {
             fh: 42,
             flags,
         })
-    }
-
-    fn fsync(&self, _req: RequestInfo, _path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
-        Ok(())
-    }
-
-    fn fsyncdir(&self, _req: RequestInfo, _path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
-        Ok(())
-    }
-
-    fn utimens(
-        &self,
-        _req: RequestInfo,
-        path: &Path,
-        _fh: Option<u64>,
-        atime: Option<std::time::SystemTime>,
-        mtime: Option<std::time::SystemTime>,
-    ) -> ResultEmpty {
-        self.do_write(path, None, None, None, atime, mtime, None)
-            .ok_or(libc::ENETUNREACH)
-    }
-
-    fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-        self.do_delete(&parent.join(name)).ok_or(libc::ENETUNREACH)
-    }
-
-    fn rename(
-        &self,
-        _req: RequestInfo,
-        parent: &Path,
-        name: &OsStr,
-        newparent: &Path,
-        newname: &OsStr,
-    ) -> ResultEmpty {
-        self.do_write(
-            &parent.join(name),
-            Some(&newparent.join(newname)),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .ok_or(libc::ENETUNREACH)
-    }
-
-    fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
-        self.do_write(path, None, None, None, None, None, Some(size))
-            .ok_or(libc::ENETUNREACH)
-    }
-
-    fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, _mode: u32) -> ResultEntry {
-        let path = parent.join(name);
-        self.do_create(&path, true).ok_or(libc::ENETUNREACH)?;
-        self.do_find(&path).map(|x| (FS_DURATION, x.attr.into()))
-    }
-
-    fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-        self.do_delete(&parent.join(name)).ok_or(libc::ENETUNREACH)
     }
 }
