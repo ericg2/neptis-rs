@@ -309,7 +309,7 @@ impl UiApp {
         self.on_manage_snapshot(mount);
     }
 
-    fn on_select_rclone_job(&self, id: Uuid) {
+    fn on_select_rclone_job(&self, id: Uuid, schedule_name: &str, server_name: &str) {
         let mut last_refresh = Instant::now();
         let mut first_time = true;
         loop {
@@ -434,7 +434,7 @@ impl UiApp {
                 }
             }
         }
-        self.show_rclone_schedules();
+        self.on_manage_rclone_jobs(schedule_name, server_name);
     }
 
     // inspected
@@ -924,7 +924,7 @@ impl UiApp {
                     const STR_START_JOB: &'static str = "Immediate Start";
                     match Select::new(
                         "Please choose an option",
-                        vec![STR_VIEW_JOBS, STR_MANAGE_ACTIONS],
+                        vec![STR_VIEW_JOBS, STR_MANAGE_ACTIONS, STR_START_JOB],
                     )
                     .prompt_skippable()
                     .expect("Failed to show prompt!")
@@ -937,7 +937,7 @@ impl UiApp {
                         },
                         Some(STR_START_JOB) => {
                             // Attempt to immediately start the job.
-                            println!("*** Attempting to start job. Please wait...");
+                            println!("\n\n*** Attempting to start job. Please wait...");
                             match self.rt.block_on(async {
                                 WebApi::ipc_start_auto_job(PostForAutoScheduleStartDto {
                                     server_name: server_owned.clone(),
@@ -971,6 +971,7 @@ impl UiApp {
     }
 
     fn on_manage_rclone_jobs(&self, schedule_name: &str, server_name: &str) {
+        clearscreen::clear().expect("Failed to clear screen!");
         if let Ok(jobs) = self.rt.block_on(async {
             WebApi::ipc_get_jobs().await.map(|y| {
                 y.into_iter()
@@ -993,7 +994,7 @@ impl UiApp {
                     .find(|x| x.to_short_id_string() == job_str)
                     .map(|x| x.job_id)
             {
-                self.on_select_rclone_job(sel_job_id);
+                self.on_select_rclone_job(sel_job_id, schedule_name, server_name);
             } else {
                 self.show_rclone_schedules();
             }
