@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "neptis-gui"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "axoupdater",
  "chrono",

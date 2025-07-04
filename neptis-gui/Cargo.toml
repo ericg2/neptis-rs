@@ -1,8 +1,16 @@
 [package]
 name = "neptis-gui"
-version = "1.2.1"
+version = "1.2.2"
 edition = "2024"
 repository = "https://github.com/ericg2/neptis-rs"
+authors = ["Eric E. Gold"]
+description = "Neptis Front End"
+
+[package.metadata.wix]
+upgrade-guid = "0678D2A5-7B4A-40C8-ABA2-0F5C96C77A9C"
+path-guid = "C0471B9E-E053-4312-AE03-01D069EFD768"
+license = false
+eula = false
 
 [dependencies]
 neptis-lib = { path = ".." }

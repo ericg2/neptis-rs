@@ -3,6 +3,14 @@ name = "neptis-rclone"
 version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/ericg2/neptis-rs"
+authors = ["Eric E. Gold"]
+description = "A local background service to run sync jobs."
+
+[package.metadata.wix]
+upgrade-guid = "1D5DC010-1FE7-4B75-8189-51AFB44FDE97"
+path-guid = "7801CD89-C559-4E60-8C98-454B449FE41A"
+license = false
+eula = false
 
 [dependencies]
 neptis-lib = { path = ".." }
