@@ -1,15 +1,10 @@
 use std::{
-    pin::Pin,
-    sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
 
 use inquire::{
     Confirm, MultiSelect, Select,
-    list_option::ListOption,
-    required,
-    validator::{self, Validation},
 };
 use tokio::runtime::Runtime;
 

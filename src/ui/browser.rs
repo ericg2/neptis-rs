@@ -1,15 +1,13 @@
 use std::{
     cmp::Ordering,
-    collections::HashMap,
     fs::{self, File},
     io::{BufWriter, Write},
-    ops::Div,
     path::{Component, Path, PathBuf},
     thread,
     time::Duration,
 };
 
-use chrono::{DateTime, Local};
+use chrono::Local;
 use indexmap::IndexMap;
 use inquire::{Confirm, Editor, Select, Text, required, validator::Validation};
 use itertools::Itertools;

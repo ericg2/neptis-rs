@@ -17,7 +17,6 @@ use std::{
     sync::Arc,
     thread,
 };
-use rocket::futures::task::Spawn;
 use tokio::runtime::Runtime;
 use url::Url;
 use uuid::Uuid;
