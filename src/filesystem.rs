@@ -376,6 +376,9 @@ use fuse_mt::{
 };
 
 #[cfg(unix)]
+use std::ffi::OsStr;
+
+#[cfg(unix)]
 impl From<GenericFileType> for FileType {
     fn from(value: GenericFileType) -> Self {
         match value {

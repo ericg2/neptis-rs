@@ -9,6 +9,7 @@ edition = "2024"
 repository = "https://github.com/ericg2/neptis-rs"
 authors = ["Eric E. Gold"]
 description = "Neptis Library"
+rust-version = "1.88.0"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

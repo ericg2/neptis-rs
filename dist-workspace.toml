@@ -16,6 +16,8 @@ install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
 github-build-setup = "build-setup.yml"
+# The preferred Rust toolchain to use in CI (rustup toolchain syntax)
+rust-toolchain-version = "1.88.0"
 
 # [dependencies.homebrew]
 # macfuse = "*"
