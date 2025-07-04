@@ -1,9 +1,4 @@
-use std::cmp::Ordering;
-use std::hint::unreachable_unchecked;
 use std::ops::{AddAssign, SubAssign};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
 /*
  * Neptis
@@ -21,15 +16,14 @@ use crate::file_size::FileSize;
 use crate::prelude::ArduinoSecret;
 use crate::rolling_secret::RollingSecret;
 use crate::traits::ToShortIdString;
-use base64::engine::Config;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{NaiveDateTime, Utc};
-use reqwest::{Body, Client, IntoUrl, Method, Response};
+use reqwest::{Client, IntoUrl, Method};
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 

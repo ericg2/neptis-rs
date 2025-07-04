@@ -1,8 +1,5 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use rand::RngCore;
-use rand::rng;
-use sha1::Digest;
-use totp_lite::{DEFAULT_STEP, Sha1, totp_custom};
+use totp_lite::{Sha1, totp_custom};
 
 /// A basic encoding layer which ONLY guards against replay
 /// attacks when used correctly! Not intended for sensitive data.

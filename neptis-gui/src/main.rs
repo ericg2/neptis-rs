@@ -2792,6 +2792,7 @@ impl UiApp {
     }
 
     #[cfg(not(unix))]
+    #[allow(dead_code)]
     fn start_fuse(&self) {
         clearscreen::clear().expect("Expected to clear screen!");
         println!(
@@ -3097,7 +3098,10 @@ impl UiApp {
         };
 
         const STR_BROWSER: &str = "File Browser";
+
+        #[cfg(unix)]
         const STR_FUSE: &str = "Start FUSE";
+
         const STR_SYNC: &str = "Manage Client-Side Sync";
         const STR_BREAKDOWN: &str = "Show Usage Breakdown";
         const STR_MESSAGE: &str = "View Messages";
@@ -3182,7 +3186,7 @@ impl UiApp {
                                     ret.trim().to_string()
                                 }
                             }
-                            Err(e) => "*** Background service pull failed!".into(),
+                            Err(_) => "*** Background service pull failed!".into(),
                         }
                     );
                 } else {

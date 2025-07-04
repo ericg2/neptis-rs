@@ -2,7 +2,7 @@
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use chrono::Utc;
-use cron::{Schedule, TimeUnitSpec};
+use cron::Schedule;
 use duct::cmd;
 use neptis_lib::apis::NeptisError;
 use neptis_lib::db::sync_models::{
@@ -12,8 +12,6 @@ use neptis_lib::prelude::{
     DbController, PostForAutoScheduleStartDto, TransferJobInternalDto, WebApi,
 };
 use neptis_lib::rolling_secret::RollingSecret;
-use rocket::futures::task::Spawn;
-use rocket::yansi::Paint;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::path::Path;
@@ -98,23 +96,6 @@ impl RCloneJobLaunchInfo {
             Err("The local folder must be an existing, valid location!")
         } else {
             Ok(item)
-        }
-    }
-    pub fn new<S: Into<String>>(
-        host: S,
-        user_name: S,
-        password: S,
-        local_folder: S,
-        remote_folder: S,
-    ) -> Self {
-        RCloneJobLaunchInfo {
-            server_name: host.into(),
-            smb_user_name: user_name.into(),
-            smb_password: password.into(),
-            local_folder: local_folder.into(),
-            smb_folder: remote_folder.into(),
-            auto_job_schedule_name: None,
-            auto_job_action_name: None,
         }
     }
 }
@@ -434,22 +415,16 @@ impl RCloneClient {
             Ok(handle) => {
                 let rdr = BufReader::new(&handle);
                 for line in rdr.lines() {
-                    match line {
-                        Ok(line) => {
-                            println!("{}", &line);
-                            let trimmed = line.trim_matches('"');
-                            let unescaped = trimmed.replace("\\\"", "\"");
-                            println!();
-                            match serde_json::from_str::<RCloneMessage>(&unescaped) {
-                                Ok(msg) => {
-                                    mark_message("", false, msg.stats);
-                                }
-                                Err(e) => println!("Json Error: {e}"),
+                    if let Ok(line) = line {
+                        println!("{}", &line);
+                        let trimmed = line.trim_matches('"');
+                        let unescaped = trimmed.replace("\\\"", "\"");
+                        println!();
+                        match serde_json::from_str::<RCloneMessage>(&unescaped) {
+                            Ok(msg) => {
+                                mark_message("", false, msg.stats);
                             }
-                        }
-                        Err(e) => {
-                            //let msg = &format!("Failed to read line! Error: {e}");
-                            //mark_message(msg, false, None);
+                            Err(e) => println!("Json Error: {e}"),
                         }
                     }
                     // If we are receiving a KILL request - process it here!
@@ -468,7 +443,7 @@ impl RCloneClient {
                 return;
             }
             Err(e) => {
-                let err = &format!("Failed to pull reader! Error: {e}");
+                let err = &format!("Failed to pull reader! Error: {}", e);
                 mark_message(err, true, None)
             }
         }

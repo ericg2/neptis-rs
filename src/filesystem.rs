@@ -1,19 +1,10 @@
 use base64::{Engine, prelude::BASE64_STANDARD};
-use flume::{Receiver, RecvError, SendError, Sender, bounded};
-use inquire::{Confirm, Select};
-use moka::{
-    PredicateError,
-    sync::{Cache, PredicateId},
-};
+use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use std::{
-    collections::{HashMap, VecDeque},
-    ffi::OsStr,
-    fs::OpenOptions,
-    iter::once_with,
+    collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     time::{Duration, SystemTime},
 };
 use tokio::runtime::Runtime;
@@ -88,7 +79,10 @@ pub struct GenericFileAttr {
 }
 
 const BLOCK_SIZE: u64 = 4096;
+
+#[cfg(unix)]
 const FS_DURATION: Duration = Duration::from_secs(0);
+
 const MAX_CACHE_SIZE: u64 = 1024 * 1024 * 1024;
 
 impl NeptisFS {

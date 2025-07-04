@@ -5,7 +5,7 @@ use neptis_lib::prelude::PostForAutoScheduleStartDto;
 use rocket::State;
 use rocket::serde::json::Json;
 use rocket::{Route, routes};
-use rocket::{delete, get, post, put};
+use rocket::{delete, get, post};
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;

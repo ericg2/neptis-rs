@@ -1,11 +1,9 @@
 use crate::rclone::{RCloneClient, RCloneSettings};
-use neptis_lib::prelude::{DbController, WebApi, IPC_PORT};
-use rocket::data::Limits;
+use neptis_lib::prelude::{DbController, IPC_PORT};
 use rocket::{catch, catchers, get, routes, Config};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::thread;
-use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 
 mod errors;

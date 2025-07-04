@@ -1,6 +1,5 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Row};
+use chrono::NaiveDateTime;
+use sqlx::FromRow;
 use sqlx::types::Json;
 use uuid::Uuid;
 use crate::db::sync_models::RCloneStat;

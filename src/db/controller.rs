@@ -1,4 +1,3 @@
-use std::fs;
 use std::sync::Arc;
 
 use super::server::ServerItem;
@@ -7,8 +6,7 @@ use crate::prelude::{TransferAutoJob, TransferAutoSchedule, TransferJobInternalD
 use sqlx::{
     Sqlite, SqlitePool,
     migrate::MigrateDatabase,
-    prelude::*,
-    sqlite::{SqlitePoolOptions, SqliteQueryResult},
+    sqlite::SqlitePoolOptions,
 };
 use tokio::runtime::Runtime;
 use uuid::Uuid;

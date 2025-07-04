@@ -7,7 +7,6 @@ use std::{
 use chrono::{DateTime, Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::db::sync_models::{RCloneStat, TransferJobStatus};
 use crate::traits::ToShortIdString;
 
 use super::{NeptisError, api::PointUsage};

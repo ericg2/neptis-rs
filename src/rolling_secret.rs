@@ -1,34 +1,30 @@
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
 use aes::Aes256;
-use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyInit};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use cbc::cipher::KeyIvInit;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use cbc::cipher::block_padding::Pkcs7;
+use cbc::cipher::KeyIvInit;
 use cbc::{Decryptor, Encryptor};
 use chrono::Utc;
-use hmac::{Hmac, Mac};
-use rand::rngs::{OsRng, StdRng};
-use rand::seq::{IteratorRandom, SliceRandom};
-use rand::{Rng, RngCore, SeedableRng, rng};
+use rand::{rng, Rng, RngCore};
 use sha2::Digest;
 use sha2::{Sha256, Sha512};
-use std::convert::TryInto;
-use std::str::Chars;
+use std::fmt::Display;
 use std::thread;
 use std::time::Duration;
 use std::vec::Vec;
 use totp_rs::Algorithm::SHA512;
-use totp_rs::{Secret, TOTP};
+use totp_rs::TOTP;
 
 const CHARACTERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 type Aes256CbcEnc = Encryptor<Aes256>;
 type Aes256CbcDec = Decryptor<Aes256>;
 
-impl ToString for RollingSecret {
-    fn to_string(&self) -> String {
+impl Display for RollingSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let otp_a_key = STANDARD.encode(self.otp_a.secret.as_slice());
         let otp_b_key = STANDARD.encode(self.otp_b.secret.as_slice());
-        format!("{}§{}§{}", otp_a_key, otp_b_key, self.aes_password)
+        write!(f, "{}", format!("{}§{}§{}", otp_a_key, otp_b_key, self.aes_password))
     }
 }
 
