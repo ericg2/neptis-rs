@@ -1,6 +1,6 @@
 [package]
 name = "neptis-rs"
-version = "1.2.6"
+version = "1.2.7"
 edition = "2024"
 repository = "https://github.com/ericg2/neptis-rs"
 authors = ["Eric E. Gold"]
@@ -54,7 +54,7 @@ inquire = { version = "0.7.5", features = ["editor"] }
 axoupdater = { version = "0.9", features = ["blocking"] }
 crossterm = "0.29.0"
 regex = "1.11.1"
-clap = { version = "4.5.40", features = ["derive"] }
+clap = { version = "4.5.40", features = ["derive", "env"] }
 itertools = "0.14.0"
 indexmap = "2.10.0"
 
