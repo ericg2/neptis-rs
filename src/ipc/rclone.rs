@@ -1,8 +1,18 @@
-﻿use base64::Engine;
+﻿use crate::apis::NeptisError;
+use crate::db::sync_models::{
+    RCloneMessage, RCloneStat, TransferJob, TransferJobDto, TransferJobStatus,
+};
+use crate::ipc::errors::ApiError;
+use crate::prelude::{
+    DbController, JobStatus, PostForAutoScheduleStartDto, TransferJobInternalDto, WebApi,
+};
+use crate::rolling_secret::RollingSecret;
+use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use chrono::Utc;
 use cron::Schedule;
 use duct::cmd;
+use merkle_hash::{Algorithm, MerkleTree};
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::path::Path;
@@ -21,11 +31,6 @@ use tokio::runtime::Runtime;
 use url::Url;
 use uuid::Uuid;
 use zip::ZipArchive;
-use crate::apis::NeptisError;
-use crate::db::sync_models::{RCloneMessage, RCloneStat, TransferJob, TransferJobDto, TransferJobStatus};
-use crate::ipc::errors::ApiError;
-use crate::prelude::{DbController, PostForAutoScheduleStartDto, TransferJobInternalDto, WebApi};
-use crate::rolling_secret::RollingSecret;
 
 #[cfg(target_os = "windows")]
 const DOWNLOAD_URL: &'static str = "https://downloads.rclone.org/rclone-current-windows-amd64.zip";
@@ -128,7 +133,7 @@ impl RCloneClient {
                     saved_jobs.push(db_job.into());
                 }
             }
-            saved_jobs.iter().map(|x|x.into()).collect::<Vec<_>>()
+            saved_jobs.iter().map(|x| x.into()).collect::<Vec<_>>()
         };
         Ok(all_jobs)
     }
@@ -218,6 +223,9 @@ impl RCloneClient {
             // We need to keep the `all_jobs` variable in a separate scope due to locking.
             let all_jobs = self._get_jobs_locked()?;
             for job in self.db.get_all_transfer_auto_jobs_sync()? {
+                if !job.enabled {
+                    continue;
+                }
                 println!(
                     "> Checking {}/{}/{}",
                     job.server_name, job.schedule_name, job.action_name
@@ -320,6 +328,7 @@ impl RCloneClient {
         rt: Arc<Runtime>,
         s_rx: Receiver<()>,
         r_tx: Sender<bool>,
+        is_same: bool,
     ) {
         let mark_message = |msg: &str, fatal: bool, stat: Option<RCloneStat>| {
             let _lock = &mut *jobs.lock().unwrap();
@@ -330,11 +339,15 @@ impl RCloneClient {
                 .expect("Expected job to exist after creation!");
             if !msg.is_empty() {
                 if fatal {
-                    job.dto.fatal_errors.push(msg.into());
-                    println!("Adding error '{}' to {}", msg, job.dto.job_id);
+                    if !job.dto.fatal_errors.contains(&msg.into()) {
+                        job.dto.fatal_errors.push(msg.into());
+                        println!("Adding error '{}' to {}", msg, job.dto.job_id);
+                    }
                 } else {
-                    job.dto.warnings.push(msg.into());
-                    println!("Adding warning '{}' to {}", msg, job.dto.job_id);
+                    if !job.dto.warnings.contains(&msg.into()) {
+                        job.dto.warnings.push(msg.into());
+                        println!("Adding warning '{}' to {}", msg, job.dto.job_id);
+                    }
                 }
             }
             if let Some(stat) = stat {
@@ -352,8 +365,7 @@ impl RCloneClient {
             let _ = db.save_transfer_job_internal_sync(&job.dto);
         };
 
-        // DO NOT ATTEMPT
-        if let Some(server_item) = {
+        let server_item = {
             let server_name = {
                 let _lock = &mut *jobs.lock().unwrap();
                 _lock
@@ -367,43 +379,97 @@ impl RCloneClient {
             db.get_all_servers_sync()
                 .ok()
                 .and_then(|x| x.into_iter().find(|x| x.server_name == server_name))
-        } && let Some(test_name) = server_item.user_name
-            && let Some(test_pass) = server_item.user_password
-        {
-            // This feature took 10 years to get...
-            if let Some(arduino_ep) = server_item.arduino_endpoint
-                && let Some(arduino_pass) = server_item.arduino_password
-            {
-                for _ in 0..3 {
-                    if rt
-                        .block_on(async { WebApi::wake_pc(&arduino_ep, &arduino_pass).await })
-                        .is_ok()
-                    {
+        };
+
+        if is_same {
+            // The job is the same - we don't need to do anything!
+            thread::sleep(Duration::from_secs(2));
+            mark_message(
+                "Files appear to be the same as last time. Skipping transfer...",
+                false,
+                None,
+            );
+            mark_message("", true, None);
+            return;
+        }
+
+        // If the server item exists, attempt to turn it on.
+        let job_info = {
+            let _lock = &mut *jobs.lock().unwrap();
+            let job = _lock
+                .iter()
+                .find(|x| x.dto.job_id == job_id)
+                .expect("Expected job to exist after creation!");
+            if let Some(ref schedule_name) = job.dto.auto_job_schedule_name {
+                db.get_all_transfer_auto_schedules_sync()
+                    .ok()
+                    .and_then(|x| {
+                        x.into_iter().find(|x| {
+                            x.server_name == job.dto.server_name
+                                && x.schedule_name == *schedule_name
+                        })
+                    })
+                    .map(|x| (x, job.dto.smb_folder.clone()))
+            } else {
+                None
+            }
+        };
+
+        // Attempt to find a username and password combo to test with.
+        if let Some(ref server_item) = server_item {
+            if let Some((test_name, test_pass)) = {
+                if let Some(test_name) = server_item.user_name.clone()
+                    && let Some(test_pass) = server_item.user_password.clone()
+                {
+                    Some((test_name, test_pass))
+                } else if let Some((auto_schedule, _)) = job_info.clone()
+                    && let Some(test_pass) = auto_schedule.user_password
+                    && !auto_schedule.smb_user_name.is_empty()
+                {
+                    let test_name = auto_schedule
+                        .smb_user_name
+                        .trim_end_matches("-smb")
+                        .to_string();
+                    Some((test_name, test_pass))
+                } else {
+                    None
+                }
+            } {
+                // Attempt to wake up the server with the Arduino - then connect.
+                if let Some(arduino_ep) = server_item.arduino_endpoint.clone()
+                    && let Some(arduino_pass) = server_item.arduino_password.clone()
+                {
+                    for _ in 0..2 {
+                        if rt
+                            .block_on(async { WebApi::wake_pc(&arduino_ep, &arduino_pass).await })
+                            .is_ok()
+                        {
+                            break;
+                        }
+                        thread::sleep(Duration::from_secs(2));
+                    }
+                }
+                let mut res = Err(NeptisError::Str("Failed to connect to server!".into()));
+                for _ in 0..2 {
+                    let api = WebApi::new(
+                        &server_item.server_endpoint,
+                        &test_name,
+                        &test_pass,
+                        server_item
+                            .server_password
+                            .clone()
+                            .and_then(|x| RollingSecret::from_string(&x)),
+                    );
+                    res = rt.block_on(async move { api.get_info().await });
+                    if res.is_ok() {
                         break;
                     }
                     thread::sleep(Duration::from_secs(2));
                 }
-            }
-            let mut res = Err(NeptisError::Str("Failed to connect to server!".into()));
-            for _ in 0..2 {
-                let api = WebApi::new(
-                    &server_item.server_endpoint,
-                    &test_name,
-                    &test_pass,
-                    server_item
-                        .server_password
-                        .clone()
-                        .and_then(|x| RollingSecret::from_string(&x)),
-                );
-                res = rt.block_on(async move { api.get_info().await });
-                if res.is_ok() {
-                    break;
+                if let Err(e) = res {
+                    mark_message(&e.to_string(), true, None);
+                    return;
                 }
-                thread::sleep(Duration::from_secs(2));
-            }
-            if let Err(e) = res {
-                mark_message(&e.to_string(), true, None);
-                return;
             }
         }
 
@@ -435,8 +501,85 @@ impl RCloneClient {
                         }
                     }
                 }
+
+                // Attempt to check if the backup should be finished.
+                if let Some((auto_schedule, smb_path)) = job_info.clone()
+                    && let Some(user_pass) = auto_schedule.user_password
+                    && let Some(point_name) = smb_path
+                        .trim_start_matches("/")
+                        .split_once("/")
+                        .map(|x| x.0.to_string())
+                    && let Some(server_item) = server_item.clone()
+                    && auto_schedule.backup_on_finish
+                {
+                    let user_name = auto_schedule
+                        .smb_user_name
+                        .trim_end_matches("-smb")
+                        .to_string();
+                    let api = WebApi::new(
+                        &server_item.server_endpoint,
+                        &user_name,
+                        &user_pass,
+                        server_item
+                            .server_password
+                            .clone()
+                            .and_then(|x| RollingSecret::from_string(&x)),
+                    );
+                    match rt.block_on(async {
+                        api.post_one_backup(&point_name, false).await.map(|x| x.id)
+                    }) {
+                        Ok(b_id) => {
+                            // Attempt to read the status from the server until completion.
+                            thread::sleep(Duration::from_secs(2)); // *** wait for server init.
+                            loop {
+                                if let Ok(b_job) =
+                                    rt.block_on(async { api.get_one_job(b_id).await })
+                                {
+                                    let stat = RCloneStat {
+                                        bytes: b_job.used_bytes as u64,
+                                        speed: 0,
+                                        checks: 0,
+                                        deletes: 0,
+                                        listed: 0,
+                                        renames: 0,
+                                        retry_error: false,
+                                        deleted_dirs: 0,
+                                        server_side_copies: 0,
+                                        server_side_copy_bytes: 0,
+                                        server_side_move_bytes: 0,
+                                        server_side_moves: 0,
+                                        total_bytes: b_job.total_bytes.unwrap_or(0) as u64,
+                                        total_checks: 0,
+                                        total_transfers: 0,
+                                        on_backup: true,
+                                    };
+                                    mark_message("", false, Some(stat));
+                                    for error in b_job.errors.iter() {
+                                        mark_message(
+                                            &format!("Backup Job: {}", error),
+                                            false,
+                                            None,
+                                        );
+                                    }
+
+                                    if b_job.job_status == JobStatus::Failed {
+                                        mark_message("Backup Job reported a failure.", true, None);
+                                        return;
+                                    } else if b_job.job_status == JobStatus::Successful {
+                                        break;
+                                    } else {
+                                        thread::sleep(Duration::from_secs(5));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            mark_message(&format!("Failed to start backup: {}", e), false, None);
+                        }
+                    }
+                }
+
                 mark_message("", true, None); // *** job has finished!
-                return;
             }
             Err(e) => {
                 let err = &format!("Failed to pull reader! Error: {}", e);
@@ -497,7 +640,7 @@ impl RCloneClient {
         }
     }
 
-    fn _remove_old_tmp_files<P: AsRef<Path>>(folder: P) {
+    fn _remove_old_tmp_files<P: AsRef<Path>>(folder: P, init: bool) {
         let one_day = Duration::from_secs(60 * 60 * 24);
         let now = SystemTime::now();
 
@@ -509,7 +652,9 @@ impl RCloneClient {
                     if path.extension().map_or(false, |ext| ext == "tmp") {
                         if let Ok(metadata) = fs::metadata(&path) {
                             if let Ok(modified) = metadata.modified() {
-                                if now.duration_since(modified).unwrap_or_default() > one_day {
+                                if init
+                                    || now.duration_since(modified).unwrap_or_default() > one_day
+                                {
                                     println!("Deleting: {:?}", path);
                                     let _ = fs::remove_file(&path); // Ignore errors
                                 }
@@ -527,6 +672,28 @@ impl RCloneClient {
     pub fn start_job(&self, job_id: Uuid) -> Result<(), ApiError> {
         self._ensure_check()?; // **** make sure we are okay!
         let mut _lock = self._get_jobs_locked()?;
+
+        let last_hash = {
+            if let Some(current_job) = _lock
+                .iter()
+                .find(|x| x.dto.job_id == job_id)
+                .map(|x| x.dto.clone())
+            {
+                _lock
+                    .iter()
+                    .filter(|x| {
+                        x.dto.auto_job_action_name == current_job.auto_job_action_name
+                            && x.dto.auto_job_schedule_name == current_job.auto_job_schedule_name
+                            && x.dto.server_name == current_job.server_name
+                            && x.dto.local_folder == current_job.local_folder
+                    })
+                    .max_by(|a, b| a.dto.end_date.cmp(&b.dto.end_date))
+                    .and_then(|x| x.dto.init_hash.clone())
+            } else {
+                None
+            }
+        };
+
         let job = _lock
             .iter_mut()
             .filter(|x| x.status() != TransferJobStatus::Running)
@@ -534,12 +701,30 @@ impl RCloneClient {
             .ok_or(ApiError::BadRequest(
                 "Job ID does not exist or is running already!".into(),
             ))?;
+
         let server = self
             .db
             .get_all_servers_sync()?
             .into_iter()
             .find(|x| x.server_name == job.dto.server_name)
             .ok_or(ApiError::BadRequest("Server does not exist!".into()))?;
+
+        // Attempt to check if the hash matches an existing one.
+        job.dto.init_hash = MerkleTree::builder(&job.dto.local_folder)
+            .algorithm(Algorithm::Sha256)
+            .hash_names(true) // *** include file names!
+            .build()
+            .map(|x| BASE64_STANDARD.encode(x.root.item.hash))
+            .ok();
+
+        let is_same = if let Some(ref old_hash) = last_hash
+            && let Some(ref new_hash) = job.dto.init_hash
+            && old_hash == new_hash
+        {
+            true
+        } else {
+            false
+        };
 
         let exe_path = self.settings.exe_path();
         let exe_path_str = exe_path.to_str().unwrap();
@@ -556,7 +741,7 @@ impl RCloneClient {
             c_entry += &format!("pass = {}\n", pass);
         }
 
-        Self::_remove_old_tmp_files(&self.settings.working_path);
+        Self::_remove_old_tmp_files(&self.settings.working_path, false);
         let mut config_path = self.settings.working_path.join(Uuid::new_v4().to_string());
         config_path.set_extension("tmp");
         fs::write(&config_path, c_entry)?;
@@ -593,7 +778,7 @@ impl RCloneClient {
         job._cancel_tx = Some(s_tx);
         job._cancel_rx = Some(r_rx);
         job._thread = Some(thread::spawn(move || {
-            Self::_handle_job(job_id, cmd_exp, jobs, db, rt, s_rx, r_tx)
+            Self::_handle_job(job_id, cmd_exp, jobs, db, rt, s_rx, r_tx, is_same);
         }));
         Ok(())
     }
@@ -674,6 +859,7 @@ impl RCloneClient {
                     fatal_errors: vec![].into(),
                     warnings: vec![].into(),
                     last_updated: Utc::now().naive_utc(),
+                    init_hash: None, // *** do not calculate until starting
                 },
                 _thread: None,
                 _cancel_tx: None,
@@ -685,9 +871,7 @@ impl RCloneClient {
 
     pub async fn get_job(&self, job_id: Uuid) -> Option<TransferJobDto> {
         let _lock = self._get_jobs_async().await.ok()?;
-        _lock
-            .into_iter()
-            .find(|x| x.job_id == job_id)
+        _lock.into_iter().find(|x| x.job_id == job_id)
     }
 
     pub async fn get_all_jobs(&self) -> Option<Vec<TransferJobDto>> {
@@ -695,12 +879,21 @@ impl RCloneClient {
     }
 
     pub fn new(settings: RCloneSettings, db: Arc<DbController>, rt: Arc<Runtime>) -> Self {
-        Self {
+        let cli = Self {
             settings,
             db,
             start_tx: Mutex::new(None),
             _jobs: Arc::new(Mutex::new(vec![])),
             rt,
-        }
+        };
+        Self::_remove_old_tmp_files(&cli.settings.working_path, true);
+        cli
+    }
+}
+
+impl Drop for RCloneClient {
+    fn drop(&mut self) {
+        // Attempt to automatically clean the files upon closing.
+        Self::_remove_old_tmp_files(&self.settings.working_path, true);
     }
 }

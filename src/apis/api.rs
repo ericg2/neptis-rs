@@ -505,6 +505,9 @@ impl WebApi {
     pub fn get_username(&self) -> String {
         self.user_name.clone()
     }
+    pub fn get_password(&self) -> String {
+        self.password.clone()
+    }
 
     pub async fn ipc_ping() -> Result<(), NeptisError> {
         Ok(reqwest::ClientBuilder::new()

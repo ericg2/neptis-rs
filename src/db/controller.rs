@@ -152,7 +152,9 @@ impl DbController {
                 cron_schedule = ?,
                 smb_user_name = ?,
                 smb_password = ?,
-                last_updated = ?
+                last_updated = ?,
+                backup_on_finish = ?,
+                user_password = ?
             WHERE
                 schedule_name = ?
             AND
@@ -162,6 +164,8 @@ impl DbController {
             schedule.smb_user_name,
             schedule.smb_password,
             schedule.last_updated,
+            schedule.backup_on_finish,
+            schedule.user_password,
             schedule.schedule_name,
             schedule.server_name
         )
@@ -178,8 +182,10 @@ impl DbController {
                     cron_schedule,
                     smb_user_name,
                     smb_password,
-                    last_updated
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    last_updated,
+                    backup_on_finish,
+                    user_password
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
                 schedule.schedule_name,
                 schedule.server_name,
@@ -187,6 +193,8 @@ impl DbController {
                 schedule.smb_user_name,
                 schedule.smb_password,
                 schedule.last_updated,
+                schedule.backup_on_finish,
+                schedule.user_password
             )
             .execute(&self.pool)
             .await?;
@@ -254,7 +262,8 @@ impl DbController {
             UPDATE transfer_auto_jobs
             SET
                 smb_folder = ?,
-                local_folder = ?
+                local_folder = ?,
+                enabled = ?
             WHERE
                 schedule_name = ?
             AND
@@ -264,6 +273,7 @@ impl DbController {
             "#,
             job.smb_folder,
             job.local_folder,
+            job.enabled,
             job.schedule_name,
             job.action_name,
             job.server_name,
@@ -280,14 +290,16 @@ impl DbController {
                     action_name,
                     server_name,
                     smb_folder,
-                    local_folder
-                ) VALUES (?, ?, ?, ?, ?)
+                    local_folder,
+                    enabled
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 "#,
                 job.schedule_name,
                 job.action_name,
                 job.server_name,
                 job.smb_folder,
                 job.local_folder,
+                job.enabled,
             )
             .execute(&self.pool)
             .await?;
@@ -376,7 +388,8 @@ impl DbController {
             end_date = ?,
             fatal_errors = ?,
             warnings = ?,
-            last_updated = ?
+            last_updated = ?,
+            init_hash = ?
         WHERE
             job_id = ?
         "#,
@@ -393,6 +406,7 @@ impl DbController {
             fatal_errors_json,
             warnings_json,
             job.last_updated,
+            job.init_hash,
             job.job_id,
         )
         .execute(&self.pool)
@@ -416,8 +430,9 @@ impl DbController {
                 end_date,
                 fatal_errors,
                 warnings,
-                last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_updated,
+                init_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
                 job.job_id,
                 job.auto_job_schedule_name,
@@ -433,6 +448,7 @@ impl DbController {
                 fatal_errors_json,
                 warnings_json,
                 job.last_updated,
+                job.init_hash
             )
             .execute(&self.pool)
             .await?;

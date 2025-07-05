@@ -22,7 +22,7 @@ use std::process;
 use std::str::FromStr;
 use uuid::Uuid;
 
-use inquire::{required, validator::Validation, Confirm, CustomType, Password, Select, Text};
+use inquire::{Confirm, CustomType, Password, Select, Text, required, validator::Validation};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::sync::RwLock;
@@ -57,6 +57,7 @@ struct InternalTransferAutoSchedule {
     schedule_name: String,
     cron_schedule: String,
     smb_password: String,
+    backup_on_finish: bool,
 }
 
 impl ToShortIdString for InternalTransferAutoSchedule {
@@ -71,6 +72,7 @@ impl From<TransferAutoSchedule> for InternalTransferAutoSchedule {
             schedule_name: value.schedule_name,
             cron_schedule: value.cron_schedule,
             smb_password: value.smb_password,
+            backup_on_finish: value.backup_on_finish,
         }
     }
 }
@@ -80,6 +82,7 @@ struct InternalTransferAutoJob {
     action_name: String,
     smb_folder: String,
     local_folder: String,
+    enabled: bool,
 }
 
 impl ToShortIdString for InternalTransferAutoJob {
@@ -94,6 +97,7 @@ impl From<TransferAutoJob> for InternalTransferAutoJob {
             action_name: value.action_name,
             smb_folder: value.smb_folder,
             local_folder: value.local_folder,
+            enabled: value.enabled,
         }
     }
 }
@@ -740,173 +744,198 @@ impl UiApp {
         };
         let smb_name = {
             let m_api = &*self.api.read().unwrap();
-            m_api.as_ref().map(|x| format!("{}-smb", x.get_username()))
+            m_api
+                .as_ref()
+                .map(|x| (format!("{}-smb", x.get_username()), x.get_password()))
         };
-        let ret = ModelManager::new(
-            Some(&(&self.db, &smb_name)),
-            vec![
-                ModelProperty::new(
-                    "Schedule Name",
-                    true,
-                    |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
-                        "Please enter Schedule Name",
-                    )
-                    .with_validator(required!())
-                    .with_initial_value(&dto.schedule_name)
-                    .prompt_skippable()
-                    .expect("Failed to show prompt!")
-                    {
-                        Some(x) => {
-                            dto.schedule_name = x;
-                            PromptResult::Ok
-                        }
-                        None => PromptResult::Cancel,
-                    },
-                    |dto| dto.schedule_name.clone(),
-                ),
-                ModelProperty::new(
-                    "Cron Schedule",
-                    false,
-                    |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
-                        "Please enter Cron Schedule (UTC)",
-                    )
-                    .with_validator(required!())
-                    .with_validator(|s: &str| match Schedule::from_str(s) {
-                        Ok(_) => Ok(Validation::Valid),
-                        Err(_) => Ok(Validation::Invalid("Cron schedule is not valid!".into())),
-                    })
-                    .with_initial_value(&dto.cron_schedule)
-                    .prompt_skippable()
-                    .expect("Failed to show prompt!")
-                    {
-                        Some(x) => {
-                            dto.cron_schedule = x;
-                            PromptResult::Ok
-                        }
-                        None => PromptResult::Cancel,
-                    },
-                    |dto| dto.cron_schedule.clone(),
-                ),
-                ModelProperty::new(
-                    "SMB Password",
-                    false,
-                    |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
-                        "Please enter SMB Password",
-                    )
-                    .with_validator(required!())
-                    .with_initial_value(&dto.smb_password)
-                    .prompt_skippable()
-                    .expect("Failed to show prompt!")
-                    {
-                        Some(x) => {
-                            dto.smb_password = x;
-                            PromptResult::Ok
-                        }
-                        None => PromptResult::Cancel,
-                    },
-                    |dto| dto.smb_password.clone(),
-                ),
-            ],
-            Box::new({
+        let ret =
+            ModelManager::new(
+                Some(&(&self.db, &smb_name)),
+                vec![
+                    ModelProperty::new(
+                        "Schedule Name",
+                        true,
+                        |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
+                            "Please enter Schedule Name",
+                        )
+                        .with_validator(required!())
+                        .with_initial_value(&dto.schedule_name)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        {
+                            Some(x) => {
+                                dto.schedule_name = x;
+                                PromptResult::Ok
+                            }
+                            None => PromptResult::Cancel,
+                        },
+                        |dto| dto.schedule_name.clone(),
+                    ),
+                    ModelProperty::new(
+                        "Cron Schedule",
+                        false,
+                        |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
+                            "Please enter Cron Schedule (UTC)",
+                        )
+                        .with_validator(required!())
+                        .with_validator(|s: &str| match Schedule::from_str(s) {
+                            Ok(_) => Ok(Validation::Valid),
+                            Err(_) => Ok(Validation::Invalid("Cron schedule is not valid!".into())),
+                        })
+                        .with_initial_value(&dto.cron_schedule)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        {
+                            Some(x) => {
+                                dto.cron_schedule = x;
+                                PromptResult::Ok
+                            }
+                            None => PromptResult::Cancel,
+                        },
+                        |dto| dto.cron_schedule.clone(),
+                    ),
+                    ModelProperty::new(
+                        "SMB Password",
+                        false,
+                        |_, dto: &mut InternalTransferAutoSchedule| match Text::new(
+                            "Please enter SMB Password",
+                        )
+                        .with_validator(required!())
+                        .with_initial_value(&dto.smb_password)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        {
+                            Some(x) => {
+                                dto.smb_password = x;
+                                PromptResult::Ok
+                            }
+                            None => PromptResult::Cancel,
+                        },
+                        |dto| dto.smb_password.clone(),
+                    ),
+                    ModelProperty::new(
+                        "Backup On Finish",
+                        false,
+                        |_, dto: &mut InternalTransferAutoSchedule| match Confirm::new(
+                            "Do you want to Backup on Finish",
+                        )
+                        .with_default(dto.backup_on_finish)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        {
+                            Some(x) => {
+                                dto.backup_on_finish = x;
+                                PromptResult::Ok
+                            }
+                            None => PromptResult::Cancel,
+                        },
+                        |dto| dto.backup_on_finish.to_string(),
+                    ),
+                ],
+                Box::new({
+                    let server_owned = server_owned.clone();
+                    move |ctx| {
+                        let db = ctx
+                            .api
+                            .as_deref()
+                            .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                        let server_inner = server_owned.clone(); // clone again for async block
+                        Ok(db
+                            .0
+                            .get_all_transfer_auto_schedules_sync()?
+                            .into_iter()
+                            .filter(|x| x.server_name == server_inner)
+                            .map(|x| x.into())
+                            .collect::<Vec<_>>())
+                    }
+                }),
+            )
+            .with_select_title("Select a Schedule (Step 1)")
+            .with_back()
+            .with_delete(Box::new({
                 let server_owned = server_owned.clone();
-                move |ctx| {
+                move |ctx, dto| {
                     let db = ctx
                         .api
                         .as_deref()
                         .ok_or(NeptisError::Str("API is not valid!".into()))?;
-                    let server_inner = server_owned.clone(); // clone again for async block
+                    let server_inner = server_owned.clone();
                     Ok(db
                         .0
-                        .get_all_transfer_auto_schedules_sync()?
-                        .into_iter()
-                        .filter(|x| x.server_name == server_inner)
-                        .map(|x| x.into())
-                        .collect::<Vec<_>>())
+                        .delete_transfer_auto_schedule_sync(&dto.schedule_name, &server_inner)?)
                 }
-            }),
-        )
-        .with_select_title("Select a Schedule (Step 1)")
-        .with_back()
-        .with_delete(Box::new({
-            let server_owned = server_owned.clone();
-            move |ctx, dto| {
-                let db = ctx
-                    .api
-                    .as_deref()
-                    .ok_or(NeptisError::Str("API is not valid!".into()))?;
-                let server_inner = server_owned.clone();
-                Ok(db
-                    .0
-                    .delete_transfer_auto_schedule_sync(&dto.schedule_name, &server_inner)?)
-            }
-        }))
-        .with_modify(Box::new({
-            let server_owned = server_owned.clone();
-            move |ctx, all_items, dto| {
-                let db = ctx
-                    .api
-                    .as_deref()
-                    .ok_or(NeptisError::Str("API is not valid!".into()))?;
-                let server_inner = server_owned.clone();
+            }))
+            .with_modify(Box::new({
+                let server_owned = server_owned.clone();
+                move |ctx, all_items, dto| {
+                    let db = ctx
+                        .api
+                        .as_deref()
+                        .ok_or(NeptisError::Str("API is not valid!".into()))?;
+                    let server_inner = server_owned.clone();
 
-                // Check to see if any saved entries have a different password to
-                // make sure the user has not made a typo or anything.
-                const STR_CHANGE_ALL: &'static str = "*** Change All To This ***";
-                const STR_ACCEPT: &'static str = "*** Accept This Password ***";
-                let mut all_passwords = all_items
-                    .iter()
-                    .map(|x| x.smb_password.clone())
-                    .filter(|x| !x.is_empty())
-                    .unique()
-                    .collect::<Vec<_>>();
+                    // Check to see if any saved entries have a different password to
+                    // make sure the user has not made a typo or anything.
+                    const STR_CHANGE_ALL: &'static str = "*** Change All To This ***";
+                    const STR_ACCEPT: &'static str = "*** Accept This Password ***";
+                    let mut all_passwords = all_items
+                        .iter()
+                        .map(|x| x.smb_password.clone())
+                        .filter(|x| !x.is_empty())
+                        .unique()
+                        .collect::<Vec<_>>();
 
-                let mut final_password = dto.smb_password.clone();
-                if all_passwords.len() > 0 && !all_passwords.contains(&dto.smb_password) {
-                    all_passwords.push(STR_CHANGE_ALL.into());
-                    all_passwords.push(STR_ACCEPT.into());
+                    let mut final_password = dto.smb_password.clone();
+                    if all_passwords.len() > 0 && !all_passwords.contains(&dto.smb_password) {
+                        all_passwords.push(STR_CHANGE_ALL.into());
+                        all_passwords.push(STR_ACCEPT.into());
 
-                    println!("\n"); // *** create a newline buffer.
-                    let ret = Select::new(
-                        "Multiple passwords on the same account! Did you make a mistake?",
-                        all_passwords,
-                    )
-                    .prompt_skippable()
-                    .expect("Failed to show prompt!")
-                    .unwrap_or(STR_ACCEPT.to_string());
-                    if ret == STR_CHANGE_ALL {
-                        for item in all_items.iter() {
-                            db.0.save_transfer_auto_schedule_sync(&TransferAutoSchedule {
-                                schedule_name: item.schedule_name.clone(),
-                                server_name: server_inner.clone(),
-                                cron_schedule: item.cron_schedule.clone(),
-                                smb_password: dto.smb_password.clone(), // *** not a spelling error
-                                smb_user_name: db
-                                    .1
-                                    .clone()
-                                    .ok_or(NeptisError::Str("Failed to find username!".into()))?,
-                                last_updated: Utc::now().naive_utc(),
-                            })?
+                        println!("\n"); // *** create a newline buffer.
+                        let ret = Select::new(
+                            "Multiple passwords on the same account! Did you make a mistake?",
+                            all_passwords,
+                        )
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        .unwrap_or(STR_ACCEPT.to_string());
+                        if ret == STR_CHANGE_ALL {
+                            for item in all_items.iter() {
+                                db.0.save_transfer_auto_schedule_sync(&TransferAutoSchedule {
+                                    schedule_name: item.schedule_name.clone(),
+                                    server_name: server_inner.clone(),
+                                    cron_schedule: item.cron_schedule.clone(),
+                                    smb_password: dto.smb_password.clone(), // *** not a spelling error
+                                    smb_user_name: db.1.clone().map(|x| x.0).ok_or(
+                                        NeptisError::Str("Failed to find username!".into()),
+                                    )?,
+                                    user_password: db.1.clone().map(|x| x.1),
+                                    backup_on_finish: dto.backup_on_finish,
+                                    last_updated: Utc::now().naive_utc(),
+                                })?
+                            }
+                        } else if ret != STR_ACCEPT {
+                            final_password = ret;
                         }
-                    } else if ret != STR_ACCEPT {
-                        final_password = ret;
                     }
+                    Ok(db
+                        .0
+                        .save_transfer_auto_schedule_sync(&TransferAutoSchedule {
+                            schedule_name: dto.schedule_name.clone(),
+                            server_name: server_inner.clone(),
+                            cron_schedule: dto.cron_schedule.clone(),
+                            smb_password: final_password.clone(),
+                            smb_user_name: db
+                                .1
+                                .clone()
+                                .map(|x| x.0)
+                                .ok_or(NeptisError::Str("Failed to find username!".into()))?,
+                            last_updated: Utc::now().naive_utc(),
+                            user_password: db.1.clone().map(|x| x.1),
+                            backup_on_finish: dto.backup_on_finish,
+                        })?)
                 }
-                Ok(db
-                    .0
-                    .save_transfer_auto_schedule_sync(&TransferAutoSchedule {
-                        schedule_name: dto.schedule_name.clone(),
-                        server_name: server_inner.clone(),
-                        cron_schedule: dto.cron_schedule.clone(),
-                        smb_password: final_password.clone(),
-                        smb_user_name: db
-                            .1
-                            .clone()
-                            .ok_or(NeptisError::Str("Failed to find username!".into()))?,
-                        last_updated: Utc::now().naive_utc(),
-                    })?)
-            }
-        }))
-        .do_display();
+            }))
+            .do_display();
         match ret {
             Ok(ret) => match ret {
                 Some(x) => {
@@ -925,7 +954,7 @@ impl UiApp {
                         }
                         Some(STR_VIEW_JOBS) => {
                             self.on_manage_rclone_jobs(&x.schedule_name, &server_owned)
-                        },
+                        }
                         Some(STR_START_JOB) => {
                             // Attempt to immediately start the job.
                             println!("\n\n*** Attempting to start job. Please wait...");
@@ -933,13 +962,14 @@ impl UiApp {
                                 WebApi::ipc_start_auto_job(PostForAutoScheduleStartDto {
                                     server_name: server_owned.clone(),
                                     schedule_name: x.schedule_name.clone(),
-                                }).await
+                                })
+                                .await
                             }) {
                                 Ok(_) => {
                                     println!("> Successfully started job!");
                                     thread::sleep(Duration::from_secs(2));
                                     self.on_manage_rclone_jobs(&x.schedule_name, &server_owned);
-                                },
+                                }
                                 Err(_) => {
                                     println!("> Failed to start job!");
                                     thread::sleep(Duration::from_secs(2));
@@ -1067,6 +1097,24 @@ impl UiApp {
                     },
                     |dto| dto.smb_folder.clone(),
                 ),
+                ModelProperty::new(
+                    "Enabled",
+                    true,
+                    |_, dto: &mut InternalTransferAutoJob| match Confirm::new(
+                        "Do you want this job enabled",
+                    )
+                        .with_default(dto.enabled)
+                        .prompt_skippable()
+                        .expect("Failed to show prompt!")
+                    {
+                        Some(x) => {
+                            dto.enabled = x;
+                            PromptResult::Ok
+                        }
+                        None => PromptResult::Cancel,
+                    },
+                    |dto| dto.enabled.to_string(),
+                ),
             ],
             Box::new({
                 let schedule_owned = schedule_owned.clone();
@@ -1128,6 +1176,7 @@ impl UiApp {
                         action_name: dto.action_name.clone(),
                         smb_folder: dto.smb_folder.clone(),
                         local_folder: dto.local_folder.clone(),
+                        enabled: dto.enabled,
                     })?)
                 }
             }))
@@ -1631,51 +1680,7 @@ impl UiApp {
     // inspected
     fn on_select_user(&self, user: &UserDto, ack: bool) {
         clearscreen::clear().expect("Failed to clear screen!");
-        let handle_sync = |new_pass: &str| -> Result<(), NeptisError> {
-            // 6-24-25: See if the user wants to change their client-side jobs (if any).
-            if let Some(server_name) = {
-                let _lock = &*self.server.read().unwrap();
-                _lock.as_ref().map(|x| x.server_name.clone())
-            } {
-                use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
-                let sync_jobs = self
-                    .db
-                    .get_all_transfer_auto_schedules_sync()?
-                    .into_iter()
-                    .filter(|x| {
-                        x.server_name == server_name
-                            && x.smb_user_name == format!("{}-smb", &user.user_name)
-                    })
-                    .collect::<Vec<_>>();
-                let job_str = sync_jobs
-                    .iter()
-                    .map(|x| {
-                        format!(
-                            "{} ({})",
-                            x.schedule_name,
-                            get_description_cron(&x.cron_schedule).unwrap_or("N/A".into())
-                        )
-                    })
-                    .join("\n");
-                if sync_jobs.len() > 0 {
-                    println!("\n{job_str}\n");
-                    if Confirm::new(
-                        "This user has several sync jobs. Do you want to set the new password to the above items?",
-                    ).prompt_skippable()
-                        .expect("Failed to show prompt!")
-                        .unwrap_or(false) {
-                        // If we are setting the password - update it for all!
-                        for mut item in sync_jobs {
-                            item.smb_password = new_pass.to_string();
-                            self.db.save_transfer_auto_schedule_sync(&item)?;
-                        }
-                        println!("*** Done!");
-                    }
-                }
-            }
 
-            Ok(())
-        };
         if ack
             || Confirm::new(
                 "The only available option is to change the password. Do you want to do this?",
@@ -1710,17 +1715,14 @@ impl UiApp {
                                 .await
                             })
                             .map(|_| ())?;
+                        Self::_on_change_password(&self.db, &user.user_name, &p)?;
                         Ok(p)
                     } else {
                         Err(NeptisError::Str("API is invalid!".into()))
                     }
                 })() {
-                    Ok(pass) => {
+                    Ok(_pass) => {
                         println!("**** Password changed successfully.");
-                        match handle_sync(&pass) {
-                            Ok(_) => println!("*** Job sync successful!"),
-                            Err(e) => println!("*** Job sync failed! Error: {e}"),
-                        }
                         thread::sleep(Duration::from_secs(2));
                         self.show_users();
                     }
@@ -2640,6 +2642,23 @@ impl UiApp {
         }
     }
 
+    fn _on_change_password(
+        db: &DbController,
+        user_name: &str,
+        new_password: &str,
+    ) -> Result<(), NeptisError> {
+        // Attempt to pull the password information.
+        let smb_name = format!("{}-smb", user_name);
+        let all_jobs = db.get_all_transfer_auto_schedules_sync()?;
+        for mut job in all_jobs {
+            if job.smb_user_name == smb_name {
+                job.user_password = Some(new_password.into());
+            }
+            db.save_transfer_auto_schedule_sync(&job)?;
+        }
+        Ok(())
+    }
+
     // inspected
     fn show_change_password(&self) {
         {
@@ -2652,9 +2671,12 @@ impl UiApp {
                 {
                     match self
                         .rt
-                        .block_on(async move { api.put_password(p.as_str()).await })
+                        .block_on(async { api.put_password(&p).await })
+                        .and_then(|_| Self::_on_change_password(&self.db, &api.get_username(), &p))
                     {
-                        Ok(_) => println!("**** Successfully changed password!"),
+                        Ok(_) => {
+                            println!("**** Successfully changed password!")
+                        }
                         Err(_) => println!("**** Failed to change password!"),
                     }
                     thread::sleep(Duration::from_secs(2));
@@ -2690,6 +2712,52 @@ impl UiApp {
     }
 
     fn show_smb(&self) {
+        let handle_sync = |user_name: &str, new_pass: &str| -> Result<(), NeptisError> {
+            // 6-24-25: See if the user wants to change their client-side jobs (if any).
+            if let Some(server_name) = {
+                let _lock = &*self.server.read().unwrap();
+                _lock.as_ref().map(|x| x.server_name.clone())
+            } {
+                use cron_descriptor::cronparser::cron_expression_descriptor::get_description_cron;
+                let sync_jobs = self
+                    .db
+                    .get_all_transfer_auto_schedules_sync()?
+                    .into_iter()
+                    .filter(|x| {
+                        x.server_name == server_name
+                            && x.smb_user_name == format!("{}-smb", user_name)
+                    })
+                    .collect::<Vec<_>>();
+                let job_str = sync_jobs
+                    .iter()
+                    .map(|x| {
+                        format!(
+                            "{} ({})",
+                            x.schedule_name,
+                            get_description_cron(&x.cron_schedule).unwrap_or("N/A".into())
+                        )
+                    })
+                    .join("\n");
+                if sync_jobs.len() > 0 {
+                    println!("\n{job_str}\n");
+                    if Confirm::new(
+                        "You have several sync jobs. Do you want to set the new password to the above items?",
+                    ).prompt_skippable()
+                        .expect("Failed to show prompt!")
+                        .unwrap_or(false) {
+                        // If we are setting the password - update it for all!
+                        for mut item in sync_jobs {
+                            item.smb_password = new_pass.to_string();
+                            self.db.save_transfer_auto_schedule_sync(&item)?;
+                        }
+                        println!("*** Done!");
+                    }
+                }
+            }
+
+            Ok(())
+        };
+
         clearscreen::clear().expect("Expected to clear screen!");
         match {
             let m_api = &*self.api.read().unwrap();
@@ -2757,10 +2825,17 @@ impl UiApp {
                                     Err(NeptisError::Str("API is not valid!".into()))
                                 }
                             } {
-                                Ok(user) => println!(
-                                    "**** Successful. It may take several minutes to apply.\nVisit '\\\\IP\\{}-<POINT NAME>-<DATA/REPO>' (all lowercase) on local SMB.",
-                                    user
-                                ),
+                                Ok(user) => {
+                                    // Attempt to set all SMB passwords here.
+                                    println!(
+                                        "**** Successful. It may take several minutes to apply.\nVisit '\\\\IP\\{}-<POINT NAME>-<DATA/REPO>' (all lowercase) on local SMB.\n",
+                                        user
+                                    );
+                                    match handle_sync(&user, &smb_pass) {
+                                        Ok(_) => println!("\n*** Password sync success!"),
+                                        Err(_) => println!("\n*** Password sync failed!"),
+                                    }
+                                }
                                 Err(e) => {
                                     println!(
                                         "**** An unexpected error has occurred. Refreshing in 5 secs: {}",
@@ -3188,18 +3263,17 @@ impl UiApp {
                 }
                 println!("Press <ENTER> to show options...");
                 last_refresh = Instant::now();
+                first_time = false;
             }
 
             // Poll for a keypress non-blocking
-            if !first_time && event::poll(Duration::from_millis(10)).unwrap() {
+            if event::poll(Duration::from_millis(100)).unwrap() {
                 if let Event::Key(k) = event::read().unwrap()
                     && k.is_press()
                 {
                     break;
                 }
             }
-
-            first_time = false;
         }
         let mut menu_items = vec![STR_BACK, STR_BROWSER];
 
@@ -3646,8 +3720,8 @@ impl UiApp {
                         "Server Password",
                         false,
                         |_, serv: &mut ServerItem| {
-                            match Editor::new("Re-type Server Password")
-                                .with_predefined_text(&serv.server_password.clone().unwrap_or("".into()))
+                            match Text::new("Enter Server Password")
+                                .with_initial_value(&serv.server_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!") {
                                 Some(x) => {
@@ -3693,7 +3767,7 @@ impl UiApp {
                         "Default User Password",
                         false,
                         |_, serv: &mut ServerItem| {
-                            match Text::new("Re-type Default User Password")
+                            match Text::new("Enter Default User Password")
                                 .with_initial_value(&serv.user_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!") {
@@ -3740,7 +3814,7 @@ impl UiApp {
                         "Arduino Password",
                         false,
                         |_, serv: &mut ServerItem| {
-                            match Text::new("Re-type Arduino Password")
+                            match Text::new("Enter Arduino Password")
                                 .with_initial_value(&serv.arduino_password.clone().unwrap_or("".into()))
                                 .prompt_skippable()
                                 .expect("Failed to show prompt!") {
@@ -3862,10 +3936,17 @@ use crossterm::event;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use inquire::formatter::StringFormatter;
 use itertools::Itertools;
-use neptis_rs::db::sync_models::{TransferJobDto};
-use neptis_rs::get_working_dir;
+use rocket::futures::SinkExt;
+use neptis_rs::db::sync_models::TransferJobDto;
 use neptis_rs::db::sync_models::TransferJobStatus;
-use neptis_rs::prelude::{AlertMode, AlertTrigger, ArduinoSecret, AutoJobDto, AutoJobType, DbController, FileSize, JobStatus, JobType, NeptisError, NeptisFS, PostForAutoScheduleStartDto, PostForMessageApi, PostForSubscriptionApi, PutForAutoJobWebApi, PutForMountApi, PutForSubscriptionApi, RepoJobDto, ServerItem, SnapshotFileDto, SubscriptionDto, TransferAutoJob, TransferAutoSchedule, UserDto, UserForCreateApi, UserForUpdateApi, WebApi};
+use neptis_rs::get_working_dir;
+use neptis_rs::prelude::{
+    AlertMode, AlertTrigger, ArduinoSecret, AutoJobDto, AutoJobType, DbController, FileSize,
+    JobStatus, JobType, NeptisError, NeptisFS, PostForAutoScheduleStartDto, PostForMessageApi,
+    PostForSubscriptionApi, PutForAutoJobWebApi, PutForMountApi, PutForSubscriptionApi, RepoJobDto,
+    ServerItem, SnapshotFileDto, SubscriptionDto, TransferAutoJob, TransferAutoSchedule, UserDto,
+    UserForCreateApi, UserForUpdateApi, WebApi,
+};
 use neptis_rs::rolling_secret::RollingSecret;
 use neptis_rs::traits::ToShortIdString;
 use neptis_rs::ui::browser::{FileBrowser, FileBrowserMode};

@@ -1,11 +1,11 @@
-use neptis_rs::prelude::{DbController, IPC_PORT};
-use rocket::{catch, catchers, get, routes, Config};
+use neptis_rs::ipc::handlers;
+use neptis_rs::ipc::rclone::{RCloneClient, RCloneSettings};
+use neptis_rs::prelude::{DbController, IPC_PORT, WebApi};
+use rocket::{Config, catch, catchers, get, routes};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::thread;
 use tokio::runtime::Runtime;
-use neptis_rs::ipc::handlers;
-use neptis_rs::ipc::rclone::{RCloneClient, RCloneSettings};
 
 #[get("/")]
 fn ping() -> &'static str {
@@ -15,6 +15,15 @@ fn ping() -> &'static str {
 #[rocket::launch]
 fn rocket() -> _ {
     let rt = Arc::new(Runtime::new().unwrap());
+
+    if rt.block_on(async { WebApi::ipc_ping().await }).is_ok() {
+        panic!(
+            "The background service port ({}) is already in-use. Is there another instance of \
+            this program running, or a separate service using this port?",
+            IPC_PORT
+        )
+    }
+
     let settings = RCloneSettings::new(neptis_rs::get_working_dir());
     let db = Arc::new(DbController::new(rt.clone()));
     let client = Arc::new(RCloneClient::new(settings, db, rt.clone()));

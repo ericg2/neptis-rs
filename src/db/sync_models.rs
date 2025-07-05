@@ -112,6 +112,8 @@ pub struct RCloneStat {
     pub total_checks: u64,
     #[serde(deserialize_with = "float_or_int_to_u64")]
     pub total_transfers: u64,
+    #[serde(default)]
+    pub on_backup: bool,
 }
 
 pub struct TransferJob {
@@ -144,10 +146,10 @@ impl ToShortIdString for TransferJobDto {
                         let percent = (stats.bytes as f64 / stats.total_bytes as f64 * 100.0).round() as u32;
                         format!("{:>16}", format!("{}% COMPLETE", percent))
                     } else {
-                        format!("{:>16}", "PROGRESS UNAVAILABLE")
+                        format!("{:>16}", "RUNNING")
                     }
                 } else {
-                    format!("{:>16}", "NO STATS")
+                    format!("{:>16}", "STARTING")
                 }
             }
             _ => format!("{:<16}", format!("{:?}", self.stat).to_uppercase()),

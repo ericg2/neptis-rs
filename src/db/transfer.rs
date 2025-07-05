@@ -11,6 +11,8 @@ pub struct TransferAutoSchedule {
     pub cron_schedule: String,
     pub smb_user_name: String,
     pub smb_password: String,
+    pub user_password: Option<String>,
+    pub backup_on_finish: bool,
     pub last_updated: NaiveDateTime
 }
 
@@ -19,8 +21,9 @@ pub struct TransferAutoJob {
     pub schedule_name: String,
     pub server_name: String,
     pub action_name: String,
-    pub smb_folder: String, // FIXME: make sure to convert from SMB!
+    pub smb_folder: String, // this will be converted to a point name
     pub local_folder: String,
+    pub enabled: bool,
 }
 
 #[derive(Clone, FromRow, PartialEq)]
@@ -39,5 +42,6 @@ pub struct TransferJobInternalDto {
     pub fatal_errors: Json<Vec<String>>,
     pub warnings: Json<Vec<String>>,
     pub last_updated: NaiveDateTime,
+    pub init_hash: Option<String>,
 }
 
