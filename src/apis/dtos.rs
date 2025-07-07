@@ -145,6 +145,7 @@ pub struct RepoJobDto {
     pub used_bytes: i64,
     pub total_bytes: Option<i64>,
     pub errors: Vec<String>,
+    pub messages: Vec<String>,
     pub create_date: NaiveDateTime,
     pub end_date: Option<NaiveDateTime>,
     pub auto_job: Option<String>,

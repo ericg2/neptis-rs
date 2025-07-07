@@ -742,11 +742,10 @@ impl WebApi {
         &self,
         name: &str,
         snapshot: &str,
-        delete: bool,
     ) -> Result<RepoJobDto, NeptisError> {
         self.post(format!(
-            "/mounts/id/{}/snapshots/{}/restore?delete={}",
-            name, snapshot, delete
+            "/mounts/id/{}/snapshots/{}/restore",
+            name, snapshot,
         ))
         .await?
         .get_result_json()

@@ -488,13 +488,18 @@ impl UiApp {
                                 .unwrap_or("-".into())
                         );
                         if !dto.errors.is_empty() {
-                            println!(
-                                "Errors ({}):        {}",
-                                dto.errors.len(),
-                                dto.errors.join(", ")
-                            );
+                            println!("Errors ({}):\n{}", dto.errors.len(), dto.errors.join("\n"));
                         } else {
                             println!("Errors:            -");
+                        }
+                        if !dto.messages.is_empty() {
+                            println!(
+                                "Messages ({}):\n{}",
+                                dto.messages.len(),
+                                dto.messages.join("\n")
+                            );
+                        } else {
+                            println!("Messages:            -");
                         }
                         println!(
                             "Create Date:       {}",
@@ -1485,9 +1490,9 @@ impl UiApp {
                     .with_default(false)
                     .prompt_skippable()
                     .expect("Failed to show prompt!"),
-                JobType::Restore => Confirm::new("Do you want to overwrite data?")
-                    .prompt_skippable()
-                    .expect("Failed to show prompt!"),
+                // JobType::Restore => Confirm::new("Do you want to overwrite data?")
+                //     .prompt_skippable()
+                //     .expect("Failed to show prompt!"),  REMOVED 7-7-25
                 _ => Some(false),
             };
 
@@ -1508,7 +1513,7 @@ impl UiApp {
                                     JobType::Backup => api.post_one_backup(mount, opt).await,
                                     JobType::Check => api.post_one_check(mount).await,
                                     JobType::Restore => {
-                                        api.post_one_restore(mount, s_ret.unwrap().id.as_str(), opt)
+                                        api.post_one_restore(mount, s_ret.unwrap().id.as_str())
                                             .await
                                     }
                                     _ => Err(NeptisError::Str("Invalid option selected".into())),
@@ -3944,7 +3949,6 @@ use crossterm::event;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use inquire::formatter::StringFormatter;
 use itertools::Itertools;
-use rocket::futures::SinkExt;
 use neptis_rs::db::sync_models::TransferJobDto;
 use neptis_rs::db::sync_models::TransferJobStatus;
 use neptis_rs::get_working_dir;
@@ -3959,6 +3963,7 @@ use neptis_rs::rolling_secret::RollingSecret;
 use neptis_rs::traits::ToShortIdString;
 use neptis_rs::ui::browser::{FileBrowser, FileBrowserMode};
 use neptis_rs::ui::manager::{ModelManager, ModelProperty, PromptResult};
+use rocket::futures::SinkExt;
 
 #[derive(Parser, Debug)]
 #[command(name = "Neptis")]
