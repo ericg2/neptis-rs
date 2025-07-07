@@ -7,14 +7,15 @@ use std::{
     time::Duration,
 };
 
-use chrono::Local;
-use indexmap::IndexMap;
-use inquire::{Confirm, Editor, Select, Text, required, validator::Validation};
-use itertools::Itertools;
 use crate::file_size::FileSize;
 use crate::filesystem::{FsNode, NeptisFS};
 use crate::prelude::GenericFileType;
 use crate::to_dto_time;
+use chrono::Local;
+use indexmap::IndexMap;
+use inquire::{Confirm, Editor, Select, Text, required, validator::Validation};
+use itertools::Itertools;
+use uuid::Uuid;
 
 pub struct FileBrowser {
     fs: NeptisFS,
@@ -71,10 +72,10 @@ impl FileBrowser {
             Some(base_sp) => {
                 let save_path = base_sp.join(format!(
                     "{}-{}",
+                    Uuid::new_v4(),
                     path.file_name()
                         .map(|x| x.to_str().unwrap())
                         .unwrap_or("unknown"),
-                    Local::now().to_string()
                 ));
                 if !fs::exists(&base_sp).unwrap_or(false) {
                     let _ = fs::create_dir_all(&base_sp);
@@ -82,7 +83,8 @@ impl FileBrowser {
                 let mut file = match File::create(&save_path) {
                     Ok(f) => BufWriter::new(f),
                     Err(e) => {
-                        eprintln!("Failed to create file: {}", e);
+                        println!("Failed to create file ('{:?}'): {}", &save_path, e);
+                        thread::sleep(Duration::from_secs(1));
                         return;
                     }
                 };
@@ -190,7 +192,13 @@ impl FileBrowser {
             .prompt_skippable()
             .expect("Failed to show prompt!")
             .map(|x| {
-                PathBuf::from(path.parent().map(|x| x.to_str().unwrap()).unwrap_or("/").replace("\\", "/")).join(x)
+                PathBuf::from(
+                    path.parent()
+                        .map(|x| x.to_str().unwrap())
+                        .unwrap_or("/")
+                        .replace("\\", "/"),
+                )
+                .join(x)
             }) {
             Some(new_path) => {
                 match self
@@ -249,10 +257,13 @@ impl FileBrowser {
         {
             return;
         }
-        match Text::new(&format!("Modifying {}", path.to_str().unwrap().replace("\\", "/")))
-            .with_initial_value(&items.unwrap_or("".into()))
-            .prompt_skippable()
-            .expect("Failed to show prompt!")
+        match Text::new(&format!(
+            "Modifying {}",
+            path.to_str().unwrap().replace("\\", "/")
+        ))
+        .with_initial_value(&items.unwrap_or("".into()))
+        .prompt_skippable()
+        .expect("Failed to show prompt!")
         {
             Some(content) => {
                 match self
@@ -399,7 +410,7 @@ impl FileBrowser {
                     .filter(|x| {
                         x.path != PathBuf::from("../..")
                             && x.path != PathBuf::from("../../..")
-                            && x.path.to_str().unwrap().trim() != ""
+                            && !vec!["..", ".", ""].contains(&x.path.to_str().unwrap().trim())
                     })
                     .sorted_by(|a, b| {
                         match (
@@ -431,7 +442,10 @@ impl FileBrowser {
                     .collect::<IndexMap<_, _>>()
             }) {
                 Some(ret) => {
-                    let mut title = format!("Current Path: {}", sel_path.to_str().unwrap().replace("\\", "/"));
+                    let mut title = format!(
+                        "Current Path: {}",
+                        sel_path.to_str().unwrap().replace("\\", "/")
+                    );
                     title += match mode {
                         FileBrowserMode::Normal => "",
                         FileBrowserMode::SelectFile => "\nPlease select any file.",
@@ -446,7 +460,7 @@ impl FileBrowser {
                             .into_iter()
                             .map(|x| x.to_string())
                             .collect::<Vec<_>>();
-                        keys.push(STR_UP.to_string());
+                        keys.insert(0, STR_UP.to_string());
                         if is_rw {
                             keys.push(STR_RW_MKDIR.to_string());
                             keys.push(STR_RW_MKNOD.to_string());
@@ -469,7 +483,10 @@ impl FileBrowser {
                                 let full_path = sel_path.join(f_node.path.clone());
                                 let is_rw = !self.is_read_only(&full_path);
                                 match Select::new(
-                                    &format!("Select action for {}", full_path.to_str().unwrap().replace("\\", "/")),
+                                    &format!(
+                                        "Select action for {}",
+                                        full_path.to_str().unwrap().replace("\\", "/")
+                                    ),
                                     {
                                         let mut actions = vec![];
                                         if f_node.attr.kind == GenericFileType::Directory {
