@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO transfer_auto_jobs (\n                    schedule_name,\n                    action_name,\n                    server_name,\n                    smb_folder,\n                    local_folder,\n                    enabled\n                ) VALUES (?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "e78c1ce2a90ee0f88273e5133aaffc06be294926d619055b933c0c4b2e7224d3"
+}

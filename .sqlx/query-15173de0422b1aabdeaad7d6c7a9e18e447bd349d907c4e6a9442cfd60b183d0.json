@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE transfer_jobs_internal\n        SET\n            auto_job_action_name = ?,\n            auto_job_schedule_name = ?,\n            server_name = ?,\n            smb_user_name = ?,\n            smb_password = ?,\n            smb_folder = ?,\n            local_folder = ?,\n            last_stats = ?,\n            start_date = ?,\n            end_date = ?,\n            fatal_errors = ?,\n            warnings = ?,\n            last_updated = ?,\n            init_hash = ?\n        WHERE\n            job_id = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 15
+    },
+    "nullable": []
+  },
+  "hash": "15173de0422b1aabdeaad7d6c7a9e18e447bd349d907c4e6a9442cfd60b183d0"
+}

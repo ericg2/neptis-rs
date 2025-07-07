@@ -3649,12 +3649,20 @@ impl UiApp {
                     d_item.server_endpoint.as_str()
                 );
                 enable_raw_mode().expect("Failed to enable raw mode");
-                if event::poll(Duration::from_secs(2)).expect("Polling failed") {
-                    if let Event::Key(k) = event::read().expect("Failed to read event")
-                        && k.is_press()
-                    {
-                        do_auto = false;
+                let start_date = Instant::now();
+                loop {
+                    if event::poll(Duration::from_millis(100)).expect("Polling failed") {
+                        if let Event::Key(k) = event::read().expect("Failed to read event")
+                            && k.is_press()
+                        {
+                            do_auto = false;
+                            break;
+                        }
                     }
+                    if start_date.elapsed().as_secs() >= 2 {
+                        break;
+                    }
+                    thread::yield_now();
                 }
                 disable_raw_mode().expect("Failed to disable raw mode");
                 if do_auto {

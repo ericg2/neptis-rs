@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO transfer_auto_schedules (\n                    schedule_name,\n                    server_name,\n                    cron_schedule,\n                    smb_user_name,\n                    smb_password,\n                    last_updated,\n                    backup_on_finish,\n                    user_password\n                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "c18319bc259035164678b5c235516e2b1f19c1303b2cd6e3454740eaef950860"
+}

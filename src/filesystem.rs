@@ -315,8 +315,8 @@ impl NeptisFS {
                         new_path: new_path.map(|x| x.to_str().unwrap().replace("\\", "/")),
                         atime: atime.map(|x| to_dto_time!(x)),
                         mtime: mtime.map(|x| to_dto_time!(x)),
-                        offset: offset,
-                        t_len: t_len,
+                        offset,
+                        t_len,
                     })
                     .await
                     .ok()

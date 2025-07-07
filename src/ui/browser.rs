@@ -164,7 +164,7 @@ impl FileBrowser {
         clearscreen::clear().expect("Failed to clear screen!");
         if Confirm::new(&format!(
             "Are you sure you want to delete '{}'",
-            path.to_str().unwrap()
+            path.to_str().unwrap().replace("\\", "/")
         ))
         .with_default(true)
         .prompt_skippable()
@@ -190,7 +190,7 @@ impl FileBrowser {
             .prompt_skippable()
             .expect("Failed to show prompt!")
             .map(|x| {
-                PathBuf::from(path.parent().map(|x| x.to_str().unwrap()).unwrap_or("/")).join(x)
+                PathBuf::from(path.parent().map(|x| x.to_str().unwrap()).unwrap_or("/").replace("\\", "/")).join(x)
             }) {
             Some(new_path) => {
                 match self
@@ -249,8 +249,8 @@ impl FileBrowser {
         {
             return;
         }
-        match Editor::new(&format!("Modifying {}", path.to_str().unwrap()))
-            .with_predefined_text(&items.unwrap_or("".into()))
+        match Text::new(&format!("Modifying {}", path.to_str().unwrap().replace("\\", "/")))
+            .with_initial_value(&items.unwrap_or("".into()))
             .prompt_skippable()
             .expect("Failed to show prompt!")
         {
@@ -421,7 +421,7 @@ impl FileBrowser {
                                     "📄"
                                 },
                                 node.path.to_str().unwrap(),
-                                chrono::DateTime::<chrono::Local>::from(node.attr.atime)
+                                chrono::DateTime::<Local>::from(node.attr.atime)
                                     .format("%Y-%m-%d %I:%M:%S %p"),
                                 FileSize::prettify(node.attr.size)
                             ),

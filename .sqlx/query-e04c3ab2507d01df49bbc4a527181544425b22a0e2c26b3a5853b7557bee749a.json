@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE transfer_auto_schedules\n            SET\n                cron_schedule = ?,\n                smb_user_name = ?,\n                smb_password = ?,\n                last_updated = ?,\n                backup_on_finish = ?,\n                user_password = ?\n            WHERE\n                schedule_name = ?\n            AND\n                server_name = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "e04c3ab2507d01df49bbc4a527181544425b22a0e2c26b3a5853b7557bee749a"
+}

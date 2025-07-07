@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE transfer_auto_jobs\n            SET\n                smb_folder = ?,\n                local_folder = ?,\n                enabled = ?\n            WHERE\n                schedule_name = ?\n            AND\n                action_name = ?\n            AND\n                server_name = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "b4d031a4a4a5b7d3226b62753b4d1e4febf539acdf962c46adfb224bf42529fa"
+}
