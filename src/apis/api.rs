@@ -1,5 +1,6 @@
+use std::fmt::Display;
 use std::ops::{AddAssign, SubAssign};
-
+use std::time::Duration;
 /*
  * Neptis
  *
@@ -18,10 +19,7 @@ use crate::rolling_secret::RollingSecret;
 use crate::traits::ToShortIdString;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{NaiveDateTime, Utc};
-use reqwest::{Client, IntoUrl, Method};
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::RetryTransientMiddleware;
-use reqwest_retry::policies::ExponentialBackoff;
+use reqwest::{Client, ClientBuilder, IntoUrl, Method};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -299,7 +297,7 @@ pub struct AuthOutputDto {
 
 pub struct WebApiConfig {
     pub base_url: String,
-    pub client: ClientWithMiddleware,
+    pub client: Client,
     pub secret: Option<RollingSecret>,
     pub user_agent: Option<String>,
     pub auth: RwLock<Option<AuthOutputDto>>,
@@ -307,7 +305,7 @@ pub struct WebApiConfig {
 
 pub struct ApiBuilder<'a, U: IntoUrl> {
     config: &'a WebApiConfig,
-    method: reqwest::Method,
+    method: Method,
     full_uri: U,
     body: Option<serde_json::Value>,
     queries: Vec<(String, String)>,
@@ -317,7 +315,7 @@ pub struct ApiBuilder<'a, U: IntoUrl> {
 impl<'a, U: IntoUrl> ApiBuilder<'a, U> {
     pub fn new(
         config: &'a WebApiConfig,
-        method: reqwest::Method,
+        method: Method,
         full_uri: U,
         token: Option<String>,
     ) -> Self {
@@ -458,6 +456,7 @@ impl<'a, U: IntoUrl> ApiBuilder<'a, U> {
             if ret.is_ok() {
                 break;
             }
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
         ret
     }
@@ -487,9 +486,9 @@ pub struct WebApi {
     password: String,
 }
 
-impl ToString for WebApi {
-    fn to_string(&self) -> String {
-        format!(
+impl Display for WebApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = format!(
             "{} (Secure: {})",
             self.config.base_url.to_owned(),
             if self.config.secret.is_some() {
@@ -497,7 +496,8 @@ impl ToString for WebApi {
             } else {
                 "NO"
             }
-        )
+        );
+        write!(f, "{}", str)
     }
 }
 
@@ -508,9 +508,12 @@ impl WebApi {
     pub fn get_password(&self) -> String {
         self.password.clone()
     }
+    pub fn get_endpoint(&self) -> String {
+        self.config.base_url.clone()
+    }
 
     pub async fn ipc_ping() -> Result<(), NeptisError> {
-        Ok(reqwest::ClientBuilder::new()
+        Ok(ClientBuilder::new()
             .build()?
             .get(format!("http://127.0.0.1:{}/ping", IPC_PORT))
             .send()
@@ -520,7 +523,7 @@ impl WebApi {
     }
 
     pub async fn ipc_cancel_job(id: Uuid) -> Result<(), NeptisError> {
-        Ok(reqwest::ClientBuilder::new()
+        Ok(ClientBuilder::new()
             .build()?
             .delete(format!(
                 "http://127.0.0.1:{}/jobs/{}",
@@ -534,7 +537,7 @@ impl WebApi {
     }
 
     pub async fn ipc_get_jobs() -> Result<Vec<TransferJobDto>, NeptisError> {
-        Ok(reqwest::ClientBuilder::new()
+        Ok(ClientBuilder::new()
             .build()?
             .get(format!("http://127.0.0.1:{}/jobs", IPC_PORT))
             .send()
@@ -545,9 +548,13 @@ impl WebApi {
     }
 
     pub async fn ipc_get_job(id: Uuid) -> Result<TransferJobDto, NeptisError> {
-        Ok(reqwest::ClientBuilder::new()
+        Ok(ClientBuilder::new()
             .build()?
-            .get(format!("http://127.0.0.1:{}/jobs/{}", IPC_PORT, id.to_string()))
+            .get(format!(
+                "http://127.0.0.1:{}/jobs/{}",
+                IPC_PORT,
+                id.to_string()
+            ))
             .send()
             .await?
             .error_for_status()?
@@ -555,9 +562,8 @@ impl WebApi {
             .await?)
     }
 
-
     pub async fn ipc_start_auto_job(dto: PostForAutoScheduleStartDto) -> Result<(), NeptisError> {
-        Ok(reqwest::ClientBuilder::new()
+        Ok(ClientBuilder::new()
             .build()?
             .post(format!("http://127.0.0.1:{}/jobs/start", IPC_PORT))
             .json(&dto)
@@ -577,7 +583,7 @@ impl WebApi {
             .ok_or(NeptisError::Str("Failed to parse Arduino Key".into()))?
             .rolling_key()
             .ok_or(NeptisError::Str("Failed to calculate next key!".into()))?;
-        Ok(reqwest::ClientBuilder::new()
+        Ok(ClientBuilder::new()
             .build()?
             .post(format!("{}/{}", arduino_ep_str, "start"))
             .bearer_auth(key.to_string())
@@ -628,15 +634,15 @@ impl WebApi {
         password: impl Into<String>,
         secret: Option<RollingSecret>,
     ) -> WebApi {
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
         WebApi {
             user_name: user_name.into(),
             password: password.into(),
             config: WebApiConfig {
                 base_url: base_path.into(),
-                client: ClientBuilder::new(Client::new())
-                    .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-                    .build(),
+                client: ClientBuilder::new()
+                    .timeout(Duration::from_secs(3))
+                    .build()
+                    .expect("Failed to build client!"),
                 secret,
                 user_agent: None,
                 auth: RwLock::new(None),
@@ -646,7 +652,7 @@ impl WebApi {
 
     async fn request(
         &self,
-        method: reqwest::Method,
+        method: Method,
         rel_path: impl Into<String>,
     ) -> Result<ApiBuilder<'_, String>, NeptisError> {
         self.ensure_auth().await?;
@@ -659,7 +665,7 @@ impl WebApi {
 
     fn raw_request(
         &self,
-        method: reqwest::Method,
+        method: Method,
         rel_path: impl Into<String>,
         token: Option<String>,
     ) -> ApiBuilder<'_, String> {
@@ -1046,13 +1052,13 @@ impl WebApi {
 
 impl Default for WebApiConfig {
     fn default() -> Self {
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
         WebApiConfig {
             base_url: "http://localhost".to_owned(),
             user_agent: Some("OpenAPI-Generator/v1/rust".to_owned()),
-            client: ClientBuilder::new(Client::new())
-                .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-                .build(),
+            client: ClientBuilder::new()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .expect("Failed to build client!"),
             secret: None,
             auth: RwLock::new(None),
         }

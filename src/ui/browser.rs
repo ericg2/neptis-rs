@@ -13,7 +13,7 @@ use crate::prelude::GenericFileType;
 use crate::to_dto_time;
 use chrono::Local;
 use indexmap::IndexMap;
-use inquire::{Confirm, Editor, Select, Text, required, validator::Validation};
+use inquire::{Confirm, Select, Text, required, validator::Validation};
 use itertools::Itertools;
 use uuid::Uuid;
 
@@ -189,6 +189,7 @@ impl FileBrowser {
         clearscreen::clear().expect("Failed to clear screen!");
         match Text::new("Please enter a new file name")
             .with_validator(required!())
+            .with_initial_value(path.file_name().map(|x| x.to_str().unwrap()).unwrap_or(""))
             .prompt_skippable()
             .expect("Failed to show prompt!")
             .map(|x| {
@@ -201,6 +202,22 @@ impl FileBrowser {
                 .join(x)
             }) {
             Some(new_path) => {
+                if let Some(old_ext) = path.extension()
+                    && let Some(new_ext) = new_path.extension()
+                    && old_ext != new_ext
+                    && Confirm::new(
+                        "Changing the file extension may result in \
+                    opening issues. Do you want to proceed?",
+                    )
+                    .with_default(true)
+                    .prompt_skippable()
+                    .expect("Failed to show prompt!")
+                    .map(|x| if !x { None } else { Some(x) })
+                    .flatten()
+                    .is_none()
+                {
+                    return; // *** extension issue!
+                }
                 match self
                     .fs
                     .do_write(&path, Some(&new_path), None, None, None, None, None)

@@ -1538,6 +1538,8 @@ impl UiApp {
                             self.on_select_mount(mount);
                         }
                     }
+                } else {
+                    self.on_select_mount(mount);
                 }
             } else {
                 self.on_select_mount(mount);
@@ -3524,7 +3526,7 @@ impl UiApp {
                             let mut user_cancelled = false;
 
                             loop {
-                                if let Ok(true) = event::poll(Duration::from_secs(0)) {
+                                if let Ok(true) = event::poll(Duration::from_secs(1)) {
                                     if let Ok(Event::Key(k)) = event::read()
                                         && k.is_press()
                                     {

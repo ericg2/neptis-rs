@@ -439,7 +439,7 @@ impl RCloneClient {
                 if let Some(arduino_ep) = server_item.arduino_endpoint.clone()
                     && let Some(arduino_pass) = server_item.arduino_password.clone()
                 {
-                    for _ in 0..2 {
+                    for _ in 0..3 {
                         if rt
                             .block_on(async { WebApi::wake_pc(&arduino_ep, &arduino_pass).await })
                             .is_ok()
